@@ -29,7 +29,7 @@ pub struct KripkeModel {
 }
 
 impl KripkeModel {
-    /// Intermediate procedures to verify CTL formulas
+    /// EX(f) = \exists v'. f(v') /\ R(v, v')
     fn bdd_check_ex(&self, f: &Bdd) -> Bdd {
         let mut f = f.clone();
         unsafe {
@@ -39,18 +39,36 @@ impl KripkeModel {
             .exists(&self.auxiliary_variables)
     }
 
+    /// EG(f) = vZ. f /\ EX(Z)
+    ///
+    /// The existence of the greatest fixpoint is guaranteed by the Tarski-Knaster theorem.
+    /// Additionally, since the set of states is finite, termination is also ensured.
+    fn bdd_check_eg(&self, f: &Bdd) -> Bdd {
+        let mut g = self.variables.mk_true();
+        let mut h = f.and(&Self::bdd_check_ex(self, &g));
+
+        loop {
+            if g == h {
+                return g;
+            }
+            g = h.clone();
+            h = f.and(&Self::bdd_check_ex(self, &h))
+        }
+    }
+
     /// Verify CTL formula
     pub fn check(&self, f: &CTL) -> Bdd {
         match f {
             CTL::AP(p) => self.atomic_propositions.get(p).cloned().unwrap(),
             CTL::EX(f) => Self::bdd_check_ex(self, &Self::check(self, f)),
+            CTL::EG(f) => Self::bdd_check_eg(self, &Self::check(self, f)),
             _ => unimplemented!(),
         }
     }
 }
 
 #[test]
-fn test() {
+fn test_check_ex() {
     use CTL::{AP, EX};
 
     // Consider Kripke structure (S, I, R, P) where S = {s0, s1}, I = {s0}, R = {(s0, s0), (s0, s1), (s1, s0)}, P = {s1}
@@ -73,4 +91,30 @@ fn test() {
 
     // EX(p) should be {s0}
     assert_eq!(result, states.eval_expression_string("!x"));
+}
+
+#[test]
+fn test_check_eg() {
+    use CTL::{AP, EG};
+
+    // Consider Kripke structure (S, I, R, P) where S = {s0, s1}, I = {s0}, R = {(s0, s1), (s1, s0), (s1, s1)}, P = {s1}
+    let vars = BddVariableSet::new(&["x", "x'"]);
+    let initial_state = vars.eval_expression_string("!x");
+    let transition_relation = vars.eval_expression_string("x | x'");
+    let p = vars.eval_expression_string("x");
+
+    let model = KripkeModel {
+        variables: vars.clone(),
+        auxiliary_variables: vec![BddVariable::from_index(1)],
+        auxiliary_map: HashMap::from([(BddVariable::from_index(0), BddVariable::from_index(1))]),
+        initial_state,
+        transition_relation,
+        atomic_propositions: HashMap::from([("p", p)]),
+    };
+
+    // Verify CTL formula EG(p)
+    let result = model.check(&EG(Box::new(AP("p"))));
+
+    // EG(p) shuold be {s0, s1}
+    assert_eq!(result, vars.eval_expression_string("x"));
 }
