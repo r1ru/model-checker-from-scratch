@@ -10,6 +10,7 @@ use std::{
 #[derive(Debug)]
 pub struct System {
     processes: Vec<Process>,
+    variables: Variables,
 }
 
 impl System {
@@ -50,6 +51,23 @@ pub struct Process {
     statements: Vec<Statement>,
 }
 
+/// Variables (All variables are global and shared)
+type Variables = BTreeMap<&'static str, i64>;
+
+/// Integer Expression
+#[derive(Debug, Clone, Hash)]
+pub enum IntegerExpression {
+    Int(i64),
+}
+
+impl IntegerExpression {
+    pub fn eval(&self) -> i64 {
+        match self {
+            Self::Int(v) => *v,
+        }
+    }
+}
+
 /// Boolean Expression
 #[derive(Debug, Clone, Hash)]
 pub enum BooleanExpression {
@@ -60,8 +78,8 @@ pub enum BooleanExpression {
 impl BooleanExpression {
     pub fn eval(&self) -> bool {
         match self {
-            BooleanExpression::True => true,
-            BooleanExpression::False => false,
+            Self::True => true,
+            Self::False => false,
         }
     }
 }
@@ -75,7 +93,7 @@ pub enum GuardStatement {
 impl GuardStatement {
     pub fn exec(&self) -> bool {
         match self {
-            GuardStatement::When(cond) => cond.eval(),
+            Self::When(cond) => cond.eval(),
         }
     }
 }
@@ -90,19 +108,81 @@ pub struct GuardedCase {
 /// Statement
 #[derive(Debug, Clone, Hash)]
 pub enum Statement {
+    Assign(&'static str, IntegerExpression),
     For(Vec<GuardedCase>),
+}
+
+/// Environment
+#[derive(Debug, Clone, Hash)]
+pub struct Environment {
+    variables: Variables,
+}
+
+impl Environment {
+    /// Set the value panic if not exist
+    pub fn var_set(&mut self, name: &'static str, val: i64) {
+        if self.variables.insert(name, val).is_none() {
+            panic!("variable does not exists: {}", name);
+        }
+    }
+
+    /// Get the value panic if not exist
+    pub fn var_get(&self, name: &str) -> i64 {
+        self.variables
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| panic!("variable does not exists: {}", name))
+    }
+}
+
+#[test]
+fn test_environment_should_success() {
+    let mut env = Environment {
+        variables: Variables::from([("x", 0)]),
+    };
+    assert_eq!(env.var_get("x"), 0);
+    env.var_set("x", 1);
+    assert_eq!(env.var_get("x"), 1);
+}
+
+#[test]
+#[should_panic(expected = "variable does not exists: y")]
+fn test_environment_var_get_should_fail() {
+    let env = Environment {
+        variables: Variables::from([("x", 0)]),
+    };
+    env.var_get("y");
+}
+
+#[test]
+#[should_panic(expected = "variable does not exists: y")]
+fn test_environment_var_set_should_fail() {
+    let mut env = Environment {
+        variables: Variables::from([("x", 0)]),
+    };
+    env.var_set("y", 1);
 }
 
 /// LocalState
 pub struct LocalState {
+    environment: Environment,
     statements: Vec<Statement>,
 }
 
 impl Statement {
     /// Return all possible worlds after execution
-    pub fn exec(&self, cont: &[Statement]) -> Option<Vec<LocalState>> {
+    pub fn exec(&self, env: &Environment, cont: &[Statement]) -> Option<Vec<LocalState>> {
         match self {
-            Statement::For(cases) => {
+            Self::Assign(var_name, expr) => {
+                // Create new environment
+                let mut new_env = env.clone();
+                new_env.var_set(var_name, expr.eval());
+                Some(vec![LocalState {
+                    environment: new_env,
+                    statements: cont.to_vec(),
+                }])
+            }
+            Self::For(cases) => {
                 let mut states = Vec::new();
 
                 for case in cases {
@@ -111,7 +191,10 @@ impl Statement {
                         stmts.push(self.clone());
                         stmts.extend(cont.to_vec());
 
-                        states.push(LocalState { statements: stmts });
+                        states.push(LocalState {
+                            environment: env.clone(),
+                            statements: stmts,
+                        });
                     }
                 }
 
@@ -137,8 +220,8 @@ impl KripkeModel {
     /// Convert to .dot string
     pub fn to_dot_string(&self) -> String {
         let mut s = String::from("digraph {\n");
-        for id in self.worlds.keys() {
-            s.push_str(&format!("\t{} [ label = \"label\" ];\n", id));
+        for (id, world) in &self.worlds {
+            s.push_str(&format!("\t{} [ label = \"{}\" ];\n", id, world.label()));
             if *id == self.initial_id {
                 s.push_str(&format!("\t{} [ penwidth = 5 ];\n", id));
             }
@@ -158,13 +241,34 @@ impl KripkeModel {
 /// World
 #[derive(Debug, Clone, Hash)]
 pub struct World {
+    environment: Environment,
     program_counters: BTreeMap<&'static str, Vec<Statement>>,
 }
 
 impl World {
+    /// Create a new world
+    pub fn new(env: Environment, pcs: BTreeMap<&'static str, Vec<Statement>>) -> World {
+        World {
+            environment: env,
+            program_counters: pcs,
+        }
+    }
+
+    // Return the label of the world
+    pub fn label(&self) -> String {
+        let mut label = String::new();
+        for (var_name, val) in &self.environment.variables {
+            label.push_str(&format!("{}={}\n", var_name, val))
+        }
+        label
+    }
+
     /// Return the initial world of the system
     pub fn initial_world(system: &System) -> World {
         World {
+            environment: Environment {
+                variables: system.variables.clone(),
+            },
             program_counters: system
                 .processes
                 .iter()
@@ -185,13 +289,11 @@ impl World {
         let mut worlds = Vec::new();
 
         for (proc_name, stmts) in &self.program_counters {
-            if let Some(nexts) = stmts[0].exec(&stmts[1..]) {
+            if let Some(nexts) = stmts[0].exec(&self.environment, &stmts[1..]) {
                 for next in nexts {
                     let mut pcs = self.program_counters.clone();
                     pcs.insert(proc_name, next.statements.clone());
-                    worlds.push(World {
-                        program_counters: pcs,
-                    });
+                    worlds.push(World::new(next.environment, pcs));
                 }
             }
         }
@@ -206,14 +308,20 @@ impl World {
 
 #[test]
 fn test() {
-    use {BooleanExpression::True, GuardStatement::When, Statement::For};
+    use {
+        BooleanExpression::True,
+        GuardStatement::When,
+        IntegerExpression::Int,
+        Statement::{Assign, For},
+    };
 
     let system = System {
+        variables: Variables::from([("x", 0)]),
         processes: vec![Process {
             name: "P0",
             statements: vec![For(vec![GuardedCase {
                 guard: When(True),
-                statements: vec![],
+                statements: vec![Assign("x", Int(1))],
             }])],
         }],
     };
