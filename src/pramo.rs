@@ -1,20 +1,65 @@
-//! Modeling language
-
+use crate::ctl::CTL;
+use crate::kripke::{SymbolicKripkeFrame, WorldId};
+use biodivine_lib_bdd::Bdd;
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::{
     collections::{hash_map::DefaultHasher, BTreeMap, HashMap},
     hash::Hasher,
 };
 
+/// Kripke model
+pub struct KripkeModel {
+    worlds: HashMap<WorldId, World>,
+    accs: HashMap<WorldId, HashSet<WorldId>>,
+    frame: SymbolicKripkeFrame,
+}
+
+impl KripkeModel {
+    fn check_internal(&self, f: &CTL<BooleanExpression>) -> Bdd {
+        match f {
+            CTL::AP(p) => self
+                .frame
+                .to_bdd(&self.worlds.keys().cloned().filter(|_| p.eval()).collect()),
+            CTL::EX(f) => self.frame.bdd_check_ex(&Self::check_internal(self, f)),
+            CTL::EG(f) => self.frame.bdd_check_eg(&Self::check_internal(self, f)),
+            CTL::EU(f1, f2) => self.frame.bdd_check_eu(
+                &Self::check_internal(self, f1),
+                &Self::check_internal(self, f2),
+            ),
+            _ => unimplemented!(),
+        }
+    }
+
+    /// Verify CTL formulas
+    pub fn check(&self, f: &CTL<BooleanExpression>) -> HashSet<WorldId> {
+        self.frame.to_ids(&Self::check_internal(self, f))
+    }
+
+    /// Convert to .dot string
+    pub fn to_dot_string(&self) -> String {
+        let mut s = String::from("digraph {");
+        for (id, wld) in &self.worlds {
+            s.push_str(&format!("\t{} [ label = \"{}\" ];\n", id, wld.label()));
+        }
+        for (from, tos) in &self.accs {
+            for to in tos {
+                s.push_str(&format!("\t{} -> {};\n", from, to));
+            }
+        }
+        s.push_str("}\n");
+        s
+    }
+}
+
 /// System
-#[derive(Debug)]
 pub struct System {
     processes: Vec<Process>,
     variables: Variables,
 }
 
 impl System {
-    /// Convert to explicit kripke model
+    /// Convert to symbolic kripke model
     pub fn to_kripke_model(&self) -> KripkeModel {
         let init = World::initial_world(self);
 
@@ -23,10 +68,10 @@ impl System {
         let mut accs = HashMap::new();
 
         while let Some(current) = stack.pop() {
-            let mut acc = Vec::new();
+            let mut acc = HashSet::new();
             if let Some(nexts) = current.step_global() {
                 for next in nexts {
-                    acc.push(next.id());
+                    acc.insert(next.id());
 
                     if visited.insert(next.id(), next.clone()).is_none() {
                         stack.push(next);
@@ -37,15 +82,14 @@ impl System {
         }
 
         KripkeModel {
-            worlds: visited,
-            initial_id: init.id(),
-            accessible: accs,
+            worlds: visited.clone(),
+            accs: accs.clone(),
+            frame: SymbolicKripkeFrame::from(visited.keys().cloned().collect(), accs),
         }
     }
 }
 
 /// Process
-#[derive(Debug)]
 pub struct Process {
     name: &'static str,
     statements: Vec<Statement>,
@@ -55,7 +99,7 @@ pub struct Process {
 type Variables = BTreeMap<&'static str, i64>;
 
 /// Integer Expression
-#[derive(Debug, Clone, Hash)]
+#[derive(Clone, Hash)]
 pub enum IntegerExpression {
     Int(i64),
 }
@@ -69,7 +113,7 @@ impl IntegerExpression {
 }
 
 /// Boolean Expression
-#[derive(Debug, Clone, Hash)]
+#[derive(Clone, Hash)]
 pub enum BooleanExpression {
     True,
     False,
@@ -85,7 +129,7 @@ impl BooleanExpression {
 }
 
 /// GuardStatement
-#[derive(Debug, Clone, Hash)]
+#[derive(Clone, Hash)]
 pub enum GuardStatement {
     When(BooleanExpression),
 }
@@ -99,21 +143,21 @@ impl GuardStatement {
 }
 
 /// GuardedCase
-#[derive(Debug, Clone, Hash)]
+#[derive(Clone, Hash)]
 pub struct GuardedCase {
     guard: GuardStatement,
     statements: Vec<Statement>,
 }
 
 /// Statement
-#[derive(Debug, Clone, Hash)]
+#[derive(Clone, Hash)]
 pub enum Statement {
     Assign(&'static str, IntegerExpression),
     For(Vec<GuardedCase>),
 }
 
 /// Environment
-#[derive(Debug, Clone, Hash)]
+#[derive(Clone, Hash)]
 pub struct Environment {
     variables: Variables,
 }
@@ -208,38 +252,8 @@ impl Statement {
     }
 }
 
-/// Explicit kripke model
-#[derive(Debug)]
-pub struct KripkeModel {
-    worlds: HashMap<u64, World>,
-    initial_id: u64,
-    accessible: HashMap<u64, Vec<u64>>,
-}
-
-impl KripkeModel {
-    /// Convert to .dot string
-    pub fn to_dot_string(&self) -> String {
-        let mut s = String::from("digraph {\n");
-        for (id, world) in &self.worlds {
-            s.push_str(&format!("\t{} [ label = \"{}\" ];\n", id, world.label()));
-            if *id == self.initial_id {
-                s.push_str(&format!("\t{} [ penwidth = 5 ];\n", id));
-            }
-        }
-
-        for (from, tos) in &self.accessible {
-            for to in tos {
-                s.push_str(&format!("\t{} -> {};\n", from, to));
-            }
-        }
-
-        s.push('}');
-        s
-    }
-}
-
 /// World
-#[derive(Debug, Clone, Hash)]
+#[derive(Clone, Hash)]
 pub struct World {
     environment: Environment,
     /// Use BTreeMap to implement Hash trait
@@ -257,11 +271,11 @@ impl World {
 
     // Return the label of the world
     pub fn label(&self) -> String {
-        let mut label = String::new();
+        let mut label = Vec::new();
         for (var_name, val) in &self.environment.variables {
-            label.push_str(&format!("{}={}\n", var_name, val))
+            label.push(String::from(&format!("{}={}", var_name, val)));
         }
-        label
+        label.join("\n")
     }
 
     /// Return the initial world of the system
@@ -279,7 +293,7 @@ impl World {
     }
 
     /// Return the unique id of the world
-    pub fn id(&self) -> u64 {
+    pub fn id(&self) -> WorldId {
         let mut hasher = DefaultHasher::new();
         self.hash(&mut hasher);
         hasher.finish()
@@ -310,6 +324,7 @@ impl World {
 #[test]
 fn test() {
     use {
+        crate::ctl::CTL::{AP, EX},
         BooleanExpression::True,
         GuardStatement::When,
         IntegerExpression::Int,
@@ -328,5 +343,6 @@ fn test() {
     };
 
     let model = system.to_kripke_model();
-    println!("{}", model.to_dot_string());
+    print!("{}", model.to_dot_string());
+    let _ = model.check(&EX(Box::new(AP(True))));
 }
