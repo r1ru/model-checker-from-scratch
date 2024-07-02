@@ -4,7 +4,7 @@ use std::collections::HashMap;
 /// CTL formulas
 #[derive(Clone)]
 pub enum CTL {
-    AP(&'static str),
+    AP(Bdd),
     Not(Box<CTL>),
     Or(Box<CTL>, Box<CTL>),
     EX(Box<CTL>),
@@ -15,20 +15,38 @@ pub enum CTL {
 /// Symbolic representation of KripkeModel
 pub struct KripkeModel {
     /// Set of all variables
-    variables: BddVariableSet,
+    ctx: BddVariableSet,
     /// Set of variables introduced to represent state transitions
     auxiliary_variables: Vec<BddVariable>,
     /// Mapping between variables and auxiliary variables
     auxiliary_map: HashMap<BddVariable, BddVariable>,
-    /// Initial state
-    initial_state: Bdd,
     /// Transition relation
     transition_relation: Bdd,
-    /// Set of all atomic propositions
-    atomic_propositions: HashMap<&'static str, Bdd>,
 }
 
 impl KripkeModel {
+    pub fn new(ctx: BddVariableSet, transition_relation: Bdd) -> Self {
+        assert_eq!(ctx.num_vars() % 2, 0);
+
+        let num_vars = ctx.num_vars() / 2;
+
+        KripkeModel {
+            ctx,
+            auxiliary_variables: (0..num_vars)
+                .map(|i| BddVariable::from_index((i + num_vars).into()))
+                .collect(),
+            auxiliary_map: (0..num_vars)
+                .map(|i| {
+                    (
+                        BddVariable::from_index(i.into()),
+                        BddVariable::from_index((i + num_vars).into()),
+                    )
+                })
+                .collect(),
+            transition_relation,
+        }
+    }
+
     /// EX(f) = \exists v'. f(v') /\ R(v, v')
     fn bdd_check_ex(&self, f: &Bdd) -> Bdd {
         let mut f = f.clone();
@@ -44,7 +62,7 @@ impl KripkeModel {
     /// The existence of the greatest fixpoint is guaranteed by the Tarski-Knaster theorem.
     /// Additionally, since the set of states is finite, termination is also ensured.
     fn bdd_check_eg(&self, f: &Bdd) -> Bdd {
-        let mut g = self.variables.mk_true();
+        let mut g = self.ctx.mk_true();
         let mut h = f.and(&Self::bdd_check_ex(self, &g));
 
         loop {
@@ -61,7 +79,7 @@ impl KripkeModel {
     /// The existence of the least fixpoint is guaranteed by the Tarski-Knaster theorem.
     /// Additionally, since the set of states is finite, termination is also ensured.
     fn bdd_check_eu(&self, f1: &Bdd, f2: &Bdd) -> Bdd {
-        let mut g = self.variables.mk_false();
+        let mut g = self.ctx.mk_false();
         let mut h = f2.or(&f1.and(&Self::bdd_check_ex(self, &g)));
 
         loop {
@@ -76,7 +94,7 @@ impl KripkeModel {
     /// Verify CTL formula
     pub fn check(&self, f: &CTL) -> Bdd {
         match f {
-            CTL::AP(p) => self.atomic_propositions.get(p).cloned().unwrap(),
+            CTL::AP(f) => f.clone(),
             CTL::EX(f) => Self::bdd_check_ex(self, &Self::check(self, f)),
             CTL::EG(f) => Self::bdd_check_eg(self, &Self::check(self, f)),
             CTL::EU(f1, f2) => {
@@ -91,77 +109,56 @@ impl KripkeModel {
 fn test_check_ex() {
     use CTL::{AP, EX};
 
-    // Consider Kripke structure (S, I, R, P) where S = {s0, s1}, I = {s0}, R = {(s0, s0), (s0, s1), (s1, s0)}, P = {s1}
-    let states = BddVariableSet::new(&["x", "x'"]);
-    let initial_state = states.eval_expression_string("!x");
-    let transition_relation = states.eval_expression_string("!x | !x'");
-    let p = states.eval_expression_string("x");
+    // Consider Kripke structure (S, R, P) where S = {s0, s1}, R = {(s0, s0), (s0, s1), (s1, s0)}
+    let ctx = BddVariableSet::new(&["x", "x'"]);
+    let transition_relation = ctx.eval_expression_string("!x | !x'");
+    // P = {s1}
+    let p = ctx.eval_expression_string("x");
 
-    let model = KripkeModel {
-        variables: states.clone(),
-        auxiliary_variables: vec![BddVariable::from_index(1)],
-        auxiliary_map: HashMap::from([(BddVariable::from_index(0), BddVariable::from_index(1))]),
-        initial_state,
-        transition_relation,
-        atomic_propositions: HashMap::from([("p", p)]),
-    };
+    let model = KripkeModel::new(ctx.clone(), transition_relation);
 
     // Verify CTL formula EX(p)
-    let result = model.check(&EX(Box::new(AP("p"))));
+    let result = model.check(&EX(Box::new(AP(p))));
 
     // EX(p) should be {s0}
-    assert_eq!(result, states.eval_expression_string("!x"));
+    assert_eq!(result, ctx.eval_expression_string("!x"));
 }
 
 #[test]
 fn test_check_eg() {
     use CTL::{AP, EG};
 
-    // Consider Kripke structure (S, I, R, P) where S = {s0, s1}, I = {s0}, R = {(s0, s1), (s1, s0), (s1, s1)}, P = {s1}
-    let vars = BddVariableSet::new(&["x", "x'"]);
-    let initial_state = vars.eval_expression_string("!x");
-    let transition_relation = vars.eval_expression_string("x | x'");
-    let p = vars.eval_expression_string("x");
+    // Consider Kripke structure (S, R, P) where S = {s0, s1}, I = {s0}, R = {(s0, s1), (s1, s0), (s1, s1)}
+    let ctx = BddVariableSet::new(&["x", "x'"]);
+    let transition_relation = ctx.eval_expression_string("x | x'");
+    // P = {s1}
+    let p = ctx.eval_expression_string("x");
 
-    let model = KripkeModel {
-        variables: vars.clone(),
-        auxiliary_variables: vec![BddVariable::from_index(1)],
-        auxiliary_map: HashMap::from([(BddVariable::from_index(0), BddVariable::from_index(1))]),
-        initial_state,
-        transition_relation,
-        atomic_propositions: HashMap::from([("p", p)]),
-    };
+    let model = KripkeModel::new(ctx.clone(), transition_relation);
 
     // Verify CTL formula EG(p)
-    let result = model.check(&EG(Box::new(AP("p"))));
+    let result = model.check(&EG(Box::new(AP(p))));
 
     // EG(p) shuold be {s0, s1}
-    assert_eq!(result, vars.eval_expression_string("x"));
+    assert_eq!(result, ctx.eval_expression_string("x"));
 }
 
 #[test]
 fn test_check_eu() {
     use CTL::{AP, EU};
 
-    // Consider Kripke structure (S, I, R, P) where S = {s0, s1}, I = {s0}, R = {(s0, s1), (s1, s0)}, P = {s0}, Q = {s1}
-    let vars = BddVariableSet::new(&["x", "x'"]);
-    let initial_state = vars.eval_expression_string("!x");
-    let transition_relation = vars.eval_expression_string("(!x & x') | (x & !x')");
-    let p = vars.eval_expression_string("!x");
-    let q = vars.eval_expression_string("x");
+    // Consider Kripke structure (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s0)}
+    let ctx = BddVariableSet::new(&["x", "x'"]);
+    let transition_relation = ctx.eval_expression_string("(!x & x') | (x & !x')");
+    // P = {s0}, Q = {s1}
+    let p = ctx.eval_expression_string("!x");
+    let q = ctx.eval_expression_string("x");
 
-    let model = KripkeModel {
-        variables: vars.clone(),
-        auxiliary_variables: vec![BddVariable::from_index(1)],
-        auxiliary_map: HashMap::from([(BddVariable::from_index(0), BddVariable::from_index(1))]),
-        initial_state,
-        transition_relation,
-        atomic_propositions: HashMap::from([("p", p), ("q", q)]),
-    };
+    let model = KripkeModel::new(ctx.clone(), transition_relation);
 
     // Verify CTL formula E(p U q)
-    let result = model.check(&EU(Box::new(AP("p")), Box::new(AP("q"))));
+    let result = model.check(&EU(Box::new(AP(p)), Box::new(AP(q))));
 
     // E(p U q) should be {s0, s1}
-    assert_eq!(result, vars.mk_true());
+    assert_eq!(result, ctx.mk_true());
 }

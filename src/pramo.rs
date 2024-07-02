@@ -2,7 +2,7 @@
 
 use std::hash::Hash;
 use std::{
-    collections::{hash_map::DefaultHasher, BTreeMap},
+    collections::{hash_map::DefaultHasher, BTreeMap, HashMap},
     hash::Hasher,
 };
 
@@ -19,8 +19,8 @@ impl System {
         let init = World::initial_world(self);
 
         let mut stack = vec![init.clone()];
-        let mut visited = BTreeMap::from([(init.id(), init.clone())]);
-        let mut accs = BTreeMap::new();
+        let mut visited = HashMap::from([(init.id(), init.clone())]);
+        let mut accs = HashMap::new();
 
         while let Some(current) = stack.pop() {
             let mut acc = Vec::new();
@@ -211,9 +211,9 @@ impl Statement {
 /// Explicit kripke model
 #[derive(Debug)]
 pub struct KripkeModel {
-    worlds: BTreeMap<u64, World>,
+    worlds: HashMap<u64, World>,
     initial_id: u64,
-    accessible: BTreeMap<u64, Vec<u64>>,
+    accessible: HashMap<u64, Vec<u64>>,
 }
 
 impl KripkeModel {
@@ -242,6 +242,7 @@ impl KripkeModel {
 #[derive(Debug, Clone, Hash)]
 pub struct World {
     environment: Environment,
+    /// Use BTreeMap to implement Hash trait
     program_counters: BTreeMap<&'static str, Vec<Statement>>,
 }
 
