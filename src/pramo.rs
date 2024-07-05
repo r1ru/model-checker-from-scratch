@@ -69,13 +69,11 @@ impl System {
 
         while let Some(current) = stack.pop() {
             let mut acc = HashSet::new();
-            if let Some(nexts) = current.step_global() {
-                for next in nexts {
-                    acc.insert(next.id());
+            for next in current.step_global() {
+                acc.insert(next.id());
 
-                    if visited.insert(next.id(), next.clone()).is_none() {
-                        stack.push(next);
-                    }
+                if visited.insert(next.id(), next.clone()).is_none() {
+                    stack.push(next);
                 }
             }
             accs.insert(current.id(), acc);
@@ -215,16 +213,16 @@ pub struct LocalState {
 
 impl Statement {
     /// Return all possible worlds after execution
-    pub fn exec(&self, env: &Environment, cont: &[Statement]) -> Option<Vec<LocalState>> {
+    pub fn exec(&self, env: &Environment, cont: &[Statement]) -> Vec<LocalState> {
         match self {
             Self::Assign(var_name, expr) => {
                 // Create new environment
                 let mut new_env = env.clone();
                 new_env.var_set(var_name, expr.eval());
-                Some(vec![LocalState {
+                vec![LocalState {
                     environment: new_env,
                     statements: cont.to_vec(),
-                }])
+                }]
             }
             Self::For(cases) => {
                 let mut states = Vec::new();
@@ -241,12 +239,7 @@ impl Statement {
                         });
                     }
                 }
-
-                if states.is_empty() {
-                    None
-                } else {
-                    Some(states)
-                }
+                states
             }
         }
     }
@@ -300,24 +293,18 @@ impl World {
     }
 
     /// Return all possible worlds that can be transitioned to in one step
-    pub fn step_global(&self) -> Option<Vec<World>> {
+    pub fn step_global(&self) -> Vec<World> {
         let mut worlds = Vec::new();
 
         for (proc_name, stmts) in &self.program_counters {
-            if let Some(nexts) = stmts[0].exec(&self.environment, &stmts[1..]) {
-                for next in nexts {
-                    let mut pcs = self.program_counters.clone();
-                    pcs.insert(proc_name, next.statements.clone());
-                    worlds.push(World::new(next.environment, pcs));
-                }
+            for next in stmts[0].exec(&self.environment, &stmts[1..]) {
+                let mut pcs = self.program_counters.clone();
+                pcs.insert(proc_name, next.statements.clone());
+                worlds.push(World::new(next.environment, pcs));
             }
         }
 
-        if !worlds.is_empty() {
-            Some(worlds)
-        } else {
-            None
-        }
+        worlds
     }
 }
 
