@@ -35,16 +35,16 @@ impl SymbolicKripkeFrame {
                 .collect()
         }
 
-        assert_eq!(worlds.len() % 2, 0);
-
         // Auxiliary variables are needed to express transition relation
-        let num_vars = (worlds.len() / 2) as u16;
+        // Note: Need +1 for odd cases
+        let num_vars = ((worlds.len() + 1) / 2) as u16;
         let ctx = BddVariableSet::new_anonymous(num_vars * 2);
         let vars: Vec<_> = ctx
             .variables()
             .into_iter()
             .filter(|v| v.to_index() < num_vars.into())
             .collect();
+
         let aux_vars: Vec<_> = ctx
             .variables()
             .into_iter()
