@@ -198,10 +198,10 @@ mod test {
 
     #[test]
     fn test_check_eg() {
-        // Consider Kripke frame (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s1)}
+        // Consider Kripke frame (S, R) where S = {s0, s1}, R = {(s1, s0), (s1, s1)}
         let frame = SymbolicKripkeFrame::from(
             HashSet::from([0, 1]),
-            HashMap::from([(0, HashSet::from([1])), (1, HashSet::from([1]))]),
+            HashMap::from([(1, HashSet::from([0, 1]))]),
         );
 
         // P = {s1}
@@ -238,8 +238,8 @@ mod test {
             HashMap::from([(0, HashSet::from([1])), (1, HashSet::from([0]))]),
         );
 
-        // P = {s0}
-        let p = P(HashSet::from([0]));
+        // P = {s1}
+        let p = P(HashSet::from([1]));
 
         // EF(p) should be {s0, s1}
         assert_eq!(
@@ -250,16 +250,16 @@ mod test {
 
     #[test]
     fn test_check_ag() {
-        // Consider Kripke frame (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s1)}
+        // Consider Kripke frame (S, R) where S = {s0, s1}, R = {(s1, s0), (s1, s1)}
         let frame = SymbolicKripkeFrame::from(
             HashSet::from([0, 1]),
-            HashMap::from([(0, HashSet::from([1])), (1, HashSet::from([1]))]),
+            HashMap::from([(1, HashSet::from([0, 1]))]),
         );
 
         // P = {s1}
         let p = P(HashSet::from([1]));
 
-        // AG(p) shuold be {}
-        assert_eq!(frame.check(&AG(Box::new(AP(p))), &sat), HashSet::from([1]));
+        // EG(p) shuold be {}
+        assert_eq!(frame.check(&AG(Box::new(AP(p))), &sat), HashSet::from([]));
     }
 }
