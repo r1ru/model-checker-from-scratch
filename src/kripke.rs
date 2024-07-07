@@ -2,6 +2,8 @@ use biodivine_lib_bdd::{Bdd, BddValuation, BddVariable, BddVariableSet};
 use core::iter::zip;
 use std::collections::{HashMap, HashSet};
 
+use crate::ctl::CTL;
+
 /// FIXME: BddVariableSet::new_anonymous expects a u16 argument
 pub type WorldId = u64;
 
@@ -70,7 +72,7 @@ impl SymbolicKripkeFrame {
     }
 
     /// Sat(EX(f)) = \exists v'. f(v') /\ R(v, v')
-    pub fn bdd_check_ex(&self, f: &Bdd) -> Bdd {
+    fn bdd_check_ex(&self, f: &Bdd) -> Bdd {
         let mut f = f.clone();
         unsafe {
             f.rename_variables(&self.aux_map);
@@ -82,7 +84,7 @@ impl SymbolicKripkeFrame {
     ///
     /// The existence of the greatest fixpoint is guaranteed by the Tarski-Knaster theorem.
     /// Additionally, since the set of states is finite, termination is also ensured.
-    pub fn bdd_check_eg(&self, f: &Bdd) -> Bdd {
+    fn bdd_check_eg(&self, f: &Bdd) -> Bdd {
         let mut g = self.ctx_all.mk_true();
         let mut h = f.and(&Self::bdd_check_ex(self, &g));
         loop {
@@ -98,7 +100,7 @@ impl SymbolicKripkeFrame {
     ///
     /// The existence of the least fixpoint is guaranteed by the Tarski-Knaster theorem.
     /// Additionally, since the set of states is finite, termination is also ensured.
-    pub fn bdd_check_eu(&self, f1: &Bdd, f2: &Bdd) -> Bdd {
+    fn bdd_check_eu(&self, f1: &Bdd, f2: &Bdd) -> Bdd {
         let mut g = self.ctx_all.mk_false();
         let mut h = f2.or(&f1.and(&Self::bdd_check_ex(self, &g)));
         loop {
@@ -111,17 +113,17 @@ impl SymbolicKripkeFrame {
     }
 
     /// Sat(EF(f)) = Sat(E(true U f))
-    pub fn bdd_check_ef(&self, f: &Bdd) -> Bdd {
+    fn bdd_check_ef(&self, f: &Bdd) -> Bdd {
         Self::bdd_check_eu(self, &self.ctx_all.mk_true(), f)
     }
 
     /// Sat(EG(f)) = Sat(!EF(!f))
-    pub fn bdd_check_ag(&self, f: &Bdd) -> Bdd {
+    fn bdd_check_ag(&self, f: &Bdd) -> Bdd {
         Self::bdd_check_ef(self, &f.not()).not()
     }
 
     /// Convert a set of world ids to Bdd
-    pub fn to_bdd(&self, set: &HashSet<WorldId>) -> Bdd {
+    fn to_bdd(&self, set: &HashSet<WorldId>) -> Bdd {
         set.iter()
             .map(|id| {
                 self.ctx_all
@@ -133,7 +135,7 @@ impl SymbolicKripkeFrame {
 
     /// Convert Bdd to a set of world ids
     /// Note: Bdd::sat_clauses cannot be used since there is no guarantee that it is a subset of dom(enc).
-    pub fn to_ids(&self, bdd: &Bdd) -> HashSet<WorldId> {
+    fn to_ids(&self, bdd: &Bdd) -> HashSet<WorldId> {
         let enc_rev: HashMap<_, _> = self.enc.clone().into_iter().map(|(k, v)| (v, k)).collect();
         // Assert: The resulting BDD does not include Boolean variables with '
         let bdd = self.ctx_vars.transfer_from(bdd, &self.ctx_all).unwrap();
@@ -141,51 +143,48 @@ impl SymbolicKripkeFrame {
             .map(|k| enc_rev.get(&k).cloned().unwrap())
             .collect()
     }
+
+    fn check_internal<P, F>(&self, f: &CTL<P>, sat: &F) -> Bdd
+    where
+        F: Fn(&P) -> HashSet<WorldId>,
+    {
+        match f {
+            CTL::AP(p) => self.to_bdd(&sat(p)),
+            CTL::EX(f) => self.bdd_check_ex(&self.check_internal(f, sat)),
+            CTL::EG(f) => self.bdd_check_eg(&self.check_internal(f, sat)),
+            CTL::EU(f1, f2) => {
+                self.bdd_check_eu(&self.check_internal(f1, sat), &self.check_internal(f2, sat))
+            }
+            CTL::EF(f) => self.bdd_check_ef(&self.check_internal(f, sat)),
+            CTL::AG(f) => self.bdd_check_ag(&self.check_internal(f, sat)),
+            _ => unimplemented!(),
+        }
+    }
+
+    /// Verify CTL formulas
+    pub fn check<P, F>(&self, f: &CTL<P>, sat: &F) -> HashSet<WorldId>
+    where
+        F: Fn(&P) -> HashSet<WorldId>,
+    {
+        self.to_ids(&self.check_internal(f, sat))
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::{SymbolicKripkeFrame, WorldId};
-    use crate::ctl::CTL::{self, *};
-    use biodivine_lib_bdd::Bdd;
+    use crate::ctl::CTL::*;
     use std::collections::{HashMap, HashSet};
 
     struct P(HashSet<WorldId>);
-    struct KripkeModel {
-        frame: SymbolicKripkeFrame,
-    }
-
-    impl KripkeModel {
-        fn from(worlds: HashSet<WorldId>, accs: HashMap<WorldId, HashSet<WorldId>>) -> KripkeModel {
-            KripkeModel {
-                frame: SymbolicKripkeFrame::from(worlds, accs),
-            }
-        }
-
-        pub fn check_internal(&self, f: &CTL<P>) -> Bdd {
-            match f {
-                CTL::AP(p) => self.frame.to_bdd(&p.0),
-                CTL::EX(f) => self.frame.bdd_check_ex(&Self::check_internal(self, f)),
-                CTL::EG(f) => self.frame.bdd_check_eg(&Self::check_internal(self, f)),
-                CTL::EU(f1, f2) => self.frame.bdd_check_eu(
-                    &Self::check_internal(self, f1),
-                    &Self::check_internal(self, f2),
-                ),
-                CTL::EF(f) => self.frame.bdd_check_ef(&Self::check_internal(self, f)),
-                CTL::AG(f) => self.frame.bdd_check_ag(&Self::check_internal(self, f)),
-                _ => unimplemented!(),
-            }
-        }
-
-        pub fn check(&self, f: &CTL<P>) -> HashSet<WorldId> {
-            self.frame.to_ids(&Self::check_internal(self, f))
-        }
+    fn sat(p: &P) -> HashSet<WorldId> {
+        p.0.clone()
     }
 
     #[test]
     fn test_check_ex() {
-        // Consider Kripke model (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s0)}
-        let frame = KripkeModel::from(
+        // Consider Kripke frame (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s0)}
+        let frame = SymbolicKripkeFrame::from(
             HashSet::from([0, 1]),
             HashMap::from([(0, HashSet::from([0, 1])), (1, HashSet::from([0]))]),
         );
@@ -194,13 +193,13 @@ mod test {
         let p = P(HashSet::from([1]));
 
         // EX(p) should be {s0}
-        assert_eq!(frame.check(&EX(Box::new(AP(p)))), HashSet::from([0]));
+        assert_eq!(frame.check(&EX(Box::new(AP(p))), &sat), HashSet::from([0]));
     }
 
     #[test]
     fn test_check_eg() {
-        // Consider Kripke model (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s1)}
-        let frame = KripkeModel::from(
+        // Consider Kripke frame (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s1)}
+        let frame = SymbolicKripkeFrame::from(
             HashSet::from([0, 1]),
             HashMap::from([(0, HashSet::from([1])), (1, HashSet::from([1]))]),
         );
@@ -209,13 +208,13 @@ mod test {
         let p = P(HashSet::from([1]));
 
         // EG(p) shuold be {s1}
-        assert_eq!(frame.check(&EG(Box::new(AP(p)))), HashSet::from([1]));
+        assert_eq!(frame.check(&EG(Box::new(AP(p))), &sat), HashSet::from([1]));
     }
 
     #[test]
     fn test_check_eu() {
-        // Consider Kripke model (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s0)}
-        let model = KripkeModel::from(
+        // Consider Kripke frame (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s0)}
+        let frame = SymbolicKripkeFrame::from(
             HashSet::from([0, 1]),
             HashMap::from([(0, HashSet::from([1])), (1, HashSet::from([0]))]),
         );
@@ -226,15 +225,15 @@ mod test {
 
         // E(p U q) should be {s0, s1}
         assert_eq!(
-            model.check(&EU(Box::new(AP(p)), Box::new(AP(q)))),
+            frame.check(&EU(Box::new(AP(p)), Box::new(AP(q))), &sat),
             HashSet::from([0, 1])
         );
     }
 
     #[test]
     fn test_check_ef() {
-        // Consider Kripke model (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s0)}
-        let model = KripkeModel::from(
+        // Consider Kripke frame (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s0)}
+        let frame = SymbolicKripkeFrame::from(
             HashSet::from([0, 1]),
             HashMap::from([(0, HashSet::from([1])), (1, HashSet::from([0]))]),
         );
@@ -243,13 +242,16 @@ mod test {
         let p = P(HashSet::from([0]));
 
         // EF(p) should be {s0, s1}
-        assert_eq!(model.check(&EF(Box::new(AP(p)))), HashSet::from([0, 1]));
+        assert_eq!(
+            frame.check(&EF(Box::new(AP(p))), &sat),
+            HashSet::from([0, 1])
+        );
     }
 
     #[test]
     fn test_check_ag() {
-        // Consider Kripke model (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s1)}
-        let frame = KripkeModel::from(
+        // Consider Kripke frame (S, R) where S = {s0, s1}, R = {(s0, s1), (s1, s1)}
+        let frame = SymbolicKripkeFrame::from(
             HashSet::from([0, 1]),
             HashMap::from([(0, HashSet::from([1])), (1, HashSet::from([1]))]),
         );
@@ -258,6 +260,6 @@ mod test {
         let p = P(HashSet::from([1]));
 
         // AG(p) shuold be {}
-        assert_eq!(frame.check(&AG(Box::new(AP(p)))), HashSet::from([1]));
+        assert_eq!(frame.check(&AG(Box::new(AP(p))), &sat), HashSet::from([1]));
     }
 }
