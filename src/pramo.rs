@@ -15,7 +15,7 @@ pub struct KripkeModel {
 }
 
 impl KripkeModel {
-    /// Verify CTL formulas
+    /// Verify a CTL formula and return counterexamples
     pub fn check(&self, f: &CTL<BooleanExpression>) -> HashSet<WorldId> {
         let sat = |p: &BooleanExpression| -> HashSet<WorldId> {
             self.worlds
@@ -24,12 +24,17 @@ impl KripkeModel {
                 .collect()
         };
 
-        self.frame.check(f, &sat)
+        let sat = self.frame.check(f, &sat);
+
+        self.worlds
+            .keys()
+            .filter_map(|id| if !sat.contains(id) { Some(*id) } else { None })
+            .collect()
     }
 
     /// Convert to .dot string
-    pub fn to_dot_string(&self) -> String {
-        let mut s = String::from("digraph {");
+    pub fn to_dot_string(&self, unsat: &HashSet<WorldId>) -> String {
+        let mut s = String::from("digraph {\n");
         for (id, wld) in &self.worlds {
             s.push_str(&format!("\t{} [ label = \"{}\" ];\n", id, wld.label()));
         }
@@ -38,7 +43,13 @@ impl KripkeModel {
                 s.push_str(&format!("\t{} -> {};\n", from, to));
             }
         }
-        s.push_str("}\n");
+        for id in unsat {
+            s.push_str(&format!(
+                "\t{} [ style=\"filled\", fillcolor=\"lightcoral\" ];\n",
+                id
+            ));
+        }
+        s.push('}');
         s
     }
 }

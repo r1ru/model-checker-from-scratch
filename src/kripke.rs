@@ -161,7 +161,7 @@ impl SymbolicKripkeFrame {
         }
     }
 
-    /// Verify CTL formulas
+    /// Verify the CTL formula f and return Sat(f)
     pub fn check<P, F>(&self, f: &CTL<P>, sat: &F) -> HashSet<WorldId>
     where
         F: Fn(&P) -> HashSet<WorldId>,
