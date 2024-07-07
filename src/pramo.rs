@@ -1,6 +1,5 @@
 use crate::ctl::CTL;
 use crate::kripke::{SymbolicKripkeFrame, WorldId};
-use biodivine_lib_bdd::Bdd;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::{
@@ -16,24 +15,16 @@ pub struct KripkeModel {
 }
 
 impl KripkeModel {
-    fn check_internal(&self, f: &CTL<BooleanExpression>) -> Bdd {
-        match f {
-            CTL::AP(p) => self
-                .frame
-                .to_bdd(&self.worlds.keys().cloned().filter(|_| p.eval()).collect()),
-            CTL::EX(f) => self.frame.bdd_check_ex(&Self::check_internal(self, f)),
-            CTL::EG(f) => self.frame.bdd_check_eg(&Self::check_internal(self, f)),
-            CTL::EU(f1, f2) => self.frame.bdd_check_eu(
-                &Self::check_internal(self, f1),
-                &Self::check_internal(self, f2),
-            ),
-            _ => unimplemented!(),
-        }
-    }
-
     /// Verify CTL formulas
     pub fn check(&self, f: &CTL<BooleanExpression>) -> HashSet<WorldId> {
-        self.frame.to_ids(&Self::check_internal(self, f))
+        let sat = |p: &BooleanExpression| -> HashSet<WorldId> {
+            self.worlds
+                .iter()
+                .filter_map(|(id, w)| if w.eval(p) { Some(*id) } else { None })
+                .collect()
+        };
+
+        self.frame.check(f, &sat)
     }
 
     /// Convert to .dot string
@@ -54,11 +45,19 @@ impl KripkeModel {
 
 /// System
 pub struct System {
-    processes: Vec<Process>,
     variables: Variables,
+    processes: Vec<Process>,
 }
 
 impl System {
+    // Crate new system
+    pub fn new(variables: Variables, processes: Vec<Process>) -> System {
+        System {
+            processes,
+            variables,
+        }
+    }
+
     /// Convert to symbolic kripke model
     pub fn to_kripke_model(&self) -> KripkeModel {
         let init = World::initial_world(self);
@@ -93,19 +92,61 @@ pub struct Process {
     statements: Vec<Statement>,
 }
 
+impl Process {
+    /// Create new process
+    pub fn new(name: &'static str, statements: Vec<Statement>) -> Process {
+        Process { name, statements }
+    }
+}
+
 /// Variables (All variables are global and shared)
-type Variables = BTreeMap<&'static str, i64>;
+pub type Variables = BTreeMap<&'static str, i64>;
+
+/// Environment
+#[derive(Clone, Hash)]
+struct Environment {
+    variables: Variables,
+}
+
+impl Environment {
+    /// Set the value panic if not exist
+    fn var_set(&mut self, name: &'static str, val: i64) {
+        if self.variables.insert(name, val).is_none() {
+            panic!("variable does not exists: {}", name);
+        }
+    }
+
+    /// Get the value panic if not exist
+    fn var_get(&self, name: &str) -> i64 {
+        self.variables
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| panic!("variable does not exists: {}", name))
+    }
+}
+
+/// LocalState
+struct LocalState {
+    environment: Environment,
+    statements: Vec<Statement>,
+}
 
 /// Integer Expression
 #[derive(Clone, Hash)]
 pub enum IntegerExpression {
     Int(i64),
+    Var(&'static str),
+    Add(Box<IntegerExpression>, Box<IntegerExpression>),
+    Sub(Box<IntegerExpression>, Box<IntegerExpression>),
 }
 
 impl IntegerExpression {
-    pub fn eval(&self) -> i64 {
+    fn eval(&self, env: &Environment) -> i64 {
         match self {
             Self::Int(v) => *v,
+            Self::Var(name) => env.var_get(name),
+            Self::Add(lhs, rhs) => lhs.eval(env) + rhs.eval(env),
+            Self::Sub(lhs, rhs) => lhs.eval(env) - rhs.eval(env),
         }
     }
 }
@@ -115,13 +156,15 @@ impl IntegerExpression {
 pub enum BooleanExpression {
     True,
     False,
+    Lt(Box<IntegerExpression>, Box<IntegerExpression>),
 }
 
 impl BooleanExpression {
-    pub fn eval(&self) -> bool {
+    fn eval(&self, env: &Environment) -> bool {
         match self {
             Self::True => true,
             Self::False => false,
+            Self::Lt(lhs, rhs) => lhs.eval(env) < rhs.eval(env),
         }
     }
 }
@@ -133,92 +176,28 @@ pub enum GuardStatement {
 }
 
 impl GuardStatement {
-    pub fn exec(&self) -> bool {
+    fn exec(&self, env: &Environment) -> bool {
         match self {
-            Self::When(cond) => cond.eval(),
+            Self::When(cond) => cond.eval(env),
         }
     }
-}
-
-/// GuardedCase
-#[derive(Clone, Hash)]
-pub struct GuardedCase {
-    guard: GuardStatement,
-    statements: Vec<Statement>,
 }
 
 /// Statement
 #[derive(Clone, Hash)]
 pub enum Statement {
     Assign(&'static str, IntegerExpression),
-    For(Vec<GuardedCase>),
-}
-
-/// Environment
-#[derive(Clone, Hash)]
-pub struct Environment {
-    variables: Variables,
-}
-
-impl Environment {
-    /// Set the value panic if not exist
-    pub fn var_set(&mut self, name: &'static str, val: i64) {
-        if self.variables.insert(name, val).is_none() {
-            panic!("variable does not exists: {}", name);
-        }
-    }
-
-    /// Get the value panic if not exist
-    pub fn var_get(&self, name: &str) -> i64 {
-        self.variables
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| panic!("variable does not exists: {}", name))
-    }
-}
-
-#[test]
-fn test_environment_should_success() {
-    let mut env = Environment {
-        variables: Variables::from([("x", 0)]),
-    };
-    assert_eq!(env.var_get("x"), 0);
-    env.var_set("x", 1);
-    assert_eq!(env.var_get("x"), 1);
-}
-
-#[test]
-#[should_panic(expected = "variable does not exists: y")]
-fn test_environment_var_get_should_fail() {
-    let env = Environment {
-        variables: Variables::from([("x", 0)]),
-    };
-    env.var_get("y");
-}
-
-#[test]
-#[should_panic(expected = "variable does not exists: y")]
-fn test_environment_var_set_should_fail() {
-    let mut env = Environment {
-        variables: Variables::from([("x", 0)]),
-    };
-    env.var_set("y", 1);
-}
-
-/// LocalState
-pub struct LocalState {
-    environment: Environment,
-    statements: Vec<Statement>,
+    For(Vec<(GuardStatement, Vec<Statement>)>),
 }
 
 impl Statement {
     /// Return all possible worlds after execution
-    pub fn exec(&self, env: &Environment, cont: &[Statement]) -> Vec<LocalState> {
+    fn exec(&self, env: &Environment, cont: &[Statement]) -> Vec<LocalState> {
         match self {
             Self::Assign(var_name, expr) => {
                 // Create new environment
                 let mut new_env = env.clone();
-                new_env.var_set(var_name, expr.eval());
+                new_env.var_set(var_name, expr.eval(env));
                 vec![LocalState {
                     environment: new_env,
                     statements: cont.to_vec(),
@@ -227,9 +206,9 @@ impl Statement {
             Self::For(cases) => {
                 let mut states = Vec::new();
 
-                for case in cases {
-                    if case.guard.exec() {
-                        let mut stmts = case.statements.clone();
+                for (guard, stmts) in cases {
+                    if guard.exec(env) {
+                        let mut stmts = stmts.clone();
                         stmts.push(self.clone());
                         stmts.extend(cont.to_vec());
 
@@ -247,23 +226,19 @@ impl Statement {
 
 /// World
 #[derive(Clone, Hash)]
-pub struct World {
+struct World {
     environment: Environment,
     /// Use BTreeMap to implement Hash trait
     program_counters: BTreeMap<&'static str, Vec<Statement>>,
 }
 
 impl World {
-    /// Create a new world
-    pub fn new(env: Environment, pcs: BTreeMap<&'static str, Vec<Statement>>) -> World {
-        World {
-            environment: env,
-            program_counters: pcs,
-        }
+    fn eval(&self, f: &BooleanExpression) -> bool {
+        f.eval(&self.environment)
     }
 
     // Return the label of the world
-    pub fn label(&self) -> String {
+    fn label(&self) -> String {
         let mut label = Vec::new();
         for (var_name, val) in &self.environment.variables {
             label.push(String::from(&format!("{}={}", var_name, val)));
@@ -272,7 +247,7 @@ impl World {
     }
 
     /// Return the initial world of the system
-    pub fn initial_world(system: &System) -> World {
+    fn initial_world(system: &System) -> World {
         World {
             environment: Environment {
                 variables: system.variables.clone(),
@@ -286,50 +261,27 @@ impl World {
     }
 
     /// Return the unique id of the world
-    pub fn id(&self) -> WorldId {
+    fn id(&self) -> WorldId {
         let mut hasher = DefaultHasher::new();
         self.hash(&mut hasher);
         hasher.finish()
     }
 
     /// Return all possible worlds that can be transitioned to in one step
-    pub fn step_global(&self) -> Vec<World> {
+    fn step_global(&self) -> Vec<World> {
         let mut worlds = Vec::new();
 
         for (proc_name, stmts) in &self.program_counters {
             for next in stmts[0].exec(&self.environment, &stmts[1..]) {
                 let mut pcs = self.program_counters.clone();
                 pcs.insert(proc_name, next.statements.clone());
-                worlds.push(World::new(next.environment, pcs));
+                worlds.push(World {
+                    environment: next.environment,
+                    program_counters: pcs,
+                })
             }
         }
 
         worlds
     }
-}
-
-#[test]
-fn test() {
-    use {
-        crate::ctl::CTL::{AP, EX},
-        BooleanExpression::True,
-        GuardStatement::When,
-        IntegerExpression::Int,
-        Statement::{Assign, For},
-    };
-
-    let system = System {
-        variables: Variables::from([("x", 0)]),
-        processes: vec![Process {
-            name: "P0",
-            statements: vec![For(vec![GuardedCase {
-                guard: When(True),
-                statements: vec![Assign("x", Int(1))],
-            }])],
-        }],
-    };
-
-    let model = system.to_kripke_model();
-    print!("{}", model.to_dot_string());
-    let _ = model.check(&EX(Box::new(AP(True))));
 }
