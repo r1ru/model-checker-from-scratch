@@ -1,4 +1,4 @@
-use biodivine_lib_bdd::{Bdd, BddPartialValuation, BddVariable, BddVariableSet};
+use biodivine_lib_bdd::{Bdd, BddValuation, BddVariable, BddVariableSet};
 use core::iter::zip;
 use std::collections::{HashMap, HashSet};
 
@@ -7,82 +7,65 @@ pub type WorldId = u64;
 
 /// Symbolic representation of Kripke frame
 pub struct SymbolicKripkeFrame {
-    /// All worlds
-    worlds: HashSet<WorldId>,
-    /// Set of all variables
-    ctx: BddVariableSet,
-    /// Boolean encoding of all worlds
-    enc: HashMap<WorldId, BddPartialValuation>,
-    /// Transition relation
-    accessible: Bdd,
-    /// Set of variables introduced to represent transition relation
+    /// Set of all Boolean variables
+    ctx_all: BddVariableSet,
+    /// Set of Boolean variables used to encode states
+    ctx_vars: BddVariableSet,
+    /// Set of auxiliary Boolean variables used to encode transitions
     aux_vars: Vec<BddVariable>,
     /// Mapping between variables and auxiliary variables
     aux_map: HashMap<BddVariable, BddVariable>,
+    /// Boolean encoding of all worlds
+    enc: HashMap<WorldId, BddValuation>,
+    /// Transition relation
+    accessible: Bdd,
 }
 
 impl SymbolicKripkeFrame {
     /// Create symbolic Kripke frame from explicit one
     pub fn from(worlds: HashSet<WorldId>, accs: HashMap<WorldId, HashSet<WorldId>>) -> Self {
-        // Generate all possible boolean assignments
-        fn all_assignments(num_vars: u16) -> Vec<Vec<bool>> {
-            fn bits_to_vec_bool(bits: usize, n: u16) -> Vec<bool> {
-                (0..n).map(|i| (bits & (1 << i)) != 0).collect()
-            }
-
-            (0..(1 << num_vars))
-                .map(|bits| bits_to_vec_bool(bits, num_vars))
-                .collect()
-        }
-
-        // Auxiliary variables are needed to express transition relation
         // Note: Need +1 for odd cases
         let num_vars = ((worlds.len() + 1) / 2) as u16;
-        let ctx = BddVariableSet::new_anonymous(num_vars * 2);
-        let vars: Vec<_> = ctx
-            .variables()
-            .into_iter()
-            .filter(|v| v.to_index() < num_vars.into())
-            .collect();
-
-        let aux_vars: Vec<_> = ctx
-            .variables()
-            .into_iter()
-            .filter(|v| v.to_index() >= num_vars.into())
-            .collect();
-        let aux_map = zip(vars, aux_vars.clone()).collect();
 
         // Create boolean encoding of all worlds
-        let mut enc = HashMap::new();
-        for (id, assignment) in zip(worlds.clone(), all_assignments(num_vars)) {
-            let vals: Vec<(BddVariable, bool)> = zip(ctx.variables(), assignment).collect();
-            enc.insert(id, BddPartialValuation::from_values(&vals));
-        }
+        let ctx_vars = BddVariableSet::new_anonymous(num_vars);
+        let enc: HashMap<WorldId, BddValuation> =
+            zip(worlds.clone(), ctx_vars.mk_true().sat_valuations()).collect();
+
+        // Auxiliary variables are needed to express transition relation
+        let ctx_all = BddVariableSet::new_anonymous(num_vars * 2);
+        let mut vars = ctx_all.variables();
+        let aux_vars = vars.split_off(num_vars as usize);
+        let aux_map: HashMap<BddVariable, BddVariable> = zip(vars, aux_vars.clone()).collect();
 
         // Create transition relation
-        let accessible = accs.iter().fold(ctx.mk_false(), |bdd, (from, tos)| {
-            Bdd::or(
-                &bdd,
-                &tos.iter()
+        let accessible = accs
+            .iter()
+            .map(|(from, tos)| {
+                tos.iter()
                     .map(|to| {
-                        let prev = ctx.mk_conjunctive_clause(enc.get(from).unwrap());
-                        let mut next = ctx.mk_conjunctive_clause(enc.get(to).unwrap());
+                        let prev =
+                            ctx_all.mk_conjunctive_clause(&enc.get(from).cloned().unwrap().into());
+                        let mut next =
+                            ctx_all.mk_conjunctive_clause(&enc.get(to).cloned().unwrap().into());
                         unsafe {
                             next.rename_variables(&aux_map);
                         }
                         prev.and(&next)
                     })
-                    .fold(ctx.mk_false(), |acc, bdd| acc.or(&bdd)),
-            )
-        });
+                    .reduce(|lhs, rhs| lhs.or(&rhs))
+                    .unwrap()
+            })
+            .reduce(|lhs, rhs| lhs.or(&rhs))
+            .unwrap();
 
         SymbolicKripkeFrame {
-            worlds,
-            ctx,
-            enc,
-            accessible,
+            ctx_all,
+            ctx_vars,
             aux_vars,
             aux_map,
+            enc,
+            accessible,
         }
     }
 
@@ -100,7 +83,7 @@ impl SymbolicKripkeFrame {
     /// The existence of the greatest fixpoint is guaranteed by the Tarski-Knaster theorem.
     /// Additionally, since the set of states is finite, termination is also ensured.
     pub fn bdd_check_eg(&self, f: &Bdd) -> Bdd {
-        let mut g = self.ctx.mk_true();
+        let mut g = self.ctx_all.mk_true();
         let mut h = f.and(&Self::bdd_check_ex(self, &g));
         loop {
             if g == h {
@@ -116,7 +99,7 @@ impl SymbolicKripkeFrame {
     /// The existence of the least fixpoint is guaranteed by the Tarski-Knaster theorem.
     /// Additionally, since the set of states is finite, termination is also ensured.
     pub fn bdd_check_eu(&self, f1: &Bdd, f2: &Bdd) -> Bdd {
-        let mut g = self.ctx.mk_false();
+        let mut g = self.ctx_all.mk_false();
         let mut h = f2.or(&f1.and(&Self::bdd_check_ex(self, &g)));
         loop {
             if g == h {
@@ -129,22 +112,24 @@ impl SymbolicKripkeFrame {
 
     /// Convert a set of world ids to Bdd
     pub fn to_bdd(&self, set: &HashSet<WorldId>) -> Bdd {
-        set.iter().fold(self.ctx.mk_false(), |bdd, id| {
-            bdd.or(&self.ctx.mk_conjunctive_clause(self.enc.get(id).unwrap()))
-        })
+        set.iter()
+            .map(|id| {
+                self.ctx_all
+                    .mk_conjunctive_clause(&self.enc.get(id).cloned().unwrap().into())
+            })
+            .reduce(|lhs, rhs| lhs.or(&rhs))
+            .unwrap()
     }
 
     /// Convert Bdd to a set of world ids
-    /// Note: If bdd is constant true, then Bdd::sat_clause returns BddPartialValuation([])
+    /// Note: Bdd::sat_clauses cannot be used since there is no guarantee that it is a subset of dom(enc).
     pub fn to_ids(&self, bdd: &Bdd) -> HashSet<WorldId> {
         let enc_rev: HashMap<_, _> = self.enc.clone().into_iter().map(|(k, v)| (v, k)).collect();
-        if bdd.eq(&self.ctx.mk_true()) {
-            self.worlds.clone()
-        } else {
-            bdd.sat_clauses()
-                .map(|k| enc_rev.get(&k).cloned().unwrap())
-                .collect()
-        }
+        // Assert: The resulting BDD does not include Boolean variables with '
+        let bdd = self.ctx_vars.transfer_from(bdd, &self.ctx_all).unwrap();
+        bdd.sat_valuations()
+            .map(|k| enc_rev.get(&k).cloned().unwrap())
+            .collect()
     }
 }
 
