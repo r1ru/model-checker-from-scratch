@@ -15,7 +15,9 @@ pub struct KripkeModel {
 }
 
 impl KripkeModel {
-    /// Verify a CTL formula and return counterexamples
+    /// Verify a CTL formula
+    ///
+    /// Returns a set of counterexamples for a safety property and a satisfying set for a liveness property
     pub fn check(&self, f: &CTL<BooleanExpression>) -> HashSet<WorldId> {
         let sat = |p: &BooleanExpression| -> HashSet<WorldId> {
             self.worlds
@@ -23,17 +25,26 @@ impl KripkeModel {
                 .filter_map(|(id, w)| if w.eval(p) { Some(*id) } else { None })
                 .collect()
         };
-
         let sat = self.frame.check(f, &sat);
 
-        self.worlds
+        let unsat = self
+            .worlds
             .keys()
             .filter_map(|id| if !sat.contains(id) { Some(*id) } else { None })
-            .collect()
+            .collect();
+
+        match f {
+            CTL::EX(_) => sat,
+            CTL::EF(_) => sat,
+            CTL::EG(_) => sat,
+            CTL::EU(_, _) => sat,
+            CTL::AG(_) => unsat,
+            _ => unimplemented!(),
+        }
     }
 
     /// Convert to .dot string
-    pub fn to_dot_string(&self, unsat: &HashSet<WorldId>) -> String {
+    pub fn to_dot_string(&self, res: &HashSet<WorldId>) -> String {
         let mut s = String::from("digraph {\n");
         for (id, wld) in &self.worlds {
             s.push_str(&format!("\t{} [ label = \"{}\" ];\n", id, wld.label()));
@@ -43,11 +54,8 @@ impl KripkeModel {
                 s.push_str(&format!("\t{} -> {};\n", from, to));
             }
         }
-        for id in unsat {
-            s.push_str(&format!(
-                "\t{} [ style=\"filled\", fillcolor=\"lightcoral\" ];\n",
-                id
-            ));
+        for id in res {
+            s.push_str(&format!("\t{} [ style = filled, fillcolor = gray ];\n", id));
         }
         s.push('}');
         s

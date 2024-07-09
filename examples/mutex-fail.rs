@@ -32,9 +32,6 @@ fn main() {
     );
 
     let model = system.to_kripke_model();
-    let unsat = model.check(&AG(Box::new(AP(Lt(
-        Box::new(Var("critical")),
-        Box::new(Int(2)),
-    )))));
-    println!("{}", model.to_dot_string(&unsat));
+    let res = model.check(&AG(Box::new(AP(Lt(Var("critical"), Int(2))))));
+    println!("{}", model.to_dot_string(&res));
 }
