@@ -208,11 +208,16 @@ impl GuardStatement {
     }
 }
 
+/// Guarded Case
+#[derive(Clone, Hash)]
+pub enum GuardedCase {
+    Case(GuardStatement, Vec<Statement>),
+}
 /// Statement
 #[derive(Clone, Hash)]
 pub enum Statement {
     Assign(&'static str, IntegerExpression),
-    For(Vec<(GuardStatement, Vec<Statement>)>),
+    For(Vec<GuardedCase>),
     Unlock(&'static str),
 }
 
@@ -239,7 +244,7 @@ impl Statement {
             Self::For(cases) => {
                 let mut states = Vec::new();
 
-                for (guard, stmts) in cases {
+                for GuardedCase::Case(guard, stmts) in cases {
                     if let Some(new_env) = guard.exec(env, proc_name) {
                         let mut stmts = stmts.clone();
                         stmts.push(self.clone());

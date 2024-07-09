@@ -3,6 +3,7 @@ use model_checker_from_scratch::{
     pramo::{
         BooleanExpression::{Lt, True},
         GuardStatement::When,
+        GuardedCase::Case,
         IntegerExpression::{Add, Int, Sub, Var},
         Locks, Process,
         Statement::{Assign, For},
@@ -13,7 +14,7 @@ use model_checker_from_scratch::{
 fn thread(name: &'static str) -> Process {
     Process::new(
         name,
-        vec![For(vec![(
+        vec![For(vec![Case(
             When(True),
             vec![
                 Assign("critical", Add(Box::new(Var("critical")), Box::new(Int(1)))),
