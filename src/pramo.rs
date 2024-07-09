@@ -57,14 +57,16 @@ impl KripkeModel {
 /// System
 pub struct System {
     variables: Variables,
+    locks: Locks,
     processes: Vec<Process>,
 }
 
 impl System {
     // Crate new system
-    pub fn new(variables: Variables, processes: Vec<Process>) -> System {
+    pub fn new(variables: Variables, locks: Locks, processes: Vec<Process>) -> System {
         System {
             processes,
+            locks,
             variables,
         }
     }
@@ -113,27 +115,14 @@ impl Process {
 /// Variables (All variables are global and shared)
 pub type Variables = BTreeMap<&'static str, i64>;
 
+/// Locks
+pub type Locks = BTreeMap<&'static str, Option<&'static str>>;
+
 /// Environment
 #[derive(Clone, Hash)]
 struct Environment {
     variables: Variables,
-}
-
-impl Environment {
-    /// Set the value panic if not exist
-    fn var_set(&mut self, name: &'static str, val: i64) {
-        if self.variables.insert(name, val).is_none() {
-            panic!("variable does not exists: {}", name);
-        }
-    }
-
-    /// Get the value panic if not exist
-    fn var_get(&self, name: &str) -> i64 {
-        self.variables
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| panic!("variable does not exists: {}", name))
-    }
+    locks: Locks,
 }
 
 /// LocalState
@@ -155,7 +144,11 @@ impl IntegerExpression {
     fn eval(&self, env: &Environment) -> i64 {
         match self {
             Self::Int(v) => *v,
-            Self::Var(name) => env.var_get(name),
+            Self::Var(name) => env
+                .variables
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| panic!("variable does not exists: {}", name)),
             Self::Add(lhs, rhs) => lhs.eval(env) + rhs.eval(env),
             Self::Sub(lhs, rhs) => lhs.eval(env) - rhs.eval(env),
         }
@@ -184,12 +177,33 @@ impl BooleanExpression {
 #[derive(Clone, Hash)]
 pub enum GuardStatement {
     When(BooleanExpression),
+    Lock(&'static str),
 }
 
 impl GuardStatement {
-    fn exec(&self, env: &Environment) -> bool {
+    fn exec(&self, env: &Environment, proc_name: &'static str) -> Option<Environment> {
         match self {
-            Self::When(cond) => cond.eval(env),
+            Self::When(cond) => {
+                if cond.eval(env) {
+                    Some(env.clone())
+                } else {
+                    None
+                }
+            }
+            Self::Lock(lock_name) => {
+                match env
+                    .locks
+                    .get(lock_name)
+                    .unwrap_or_else(|| panic!("lock does not exists: {}", lock_name))
+                {
+                    Some(_) => None,
+                    None => {
+                        let mut new_env = env.clone();
+                        new_env.locks.insert(lock_name, Some(proc_name));
+                        Some(new_env)
+                    }
+                }
+            }
         }
     }
 }
@@ -199,16 +213,24 @@ impl GuardStatement {
 pub enum Statement {
     Assign(&'static str, IntegerExpression),
     For(Vec<(GuardStatement, Vec<Statement>)>),
+    Unlock(&'static str),
 }
 
 impl Statement {
     /// Return all possible worlds after execution
-    fn exec(&self, env: &Environment, cont: &[Statement]) -> Vec<LocalState> {
+    fn exec(
+        &self,
+        env: &Environment,
+        proc_name: &'static str,
+        cont: &[Statement],
+    ) -> Vec<LocalState> {
         match self {
             Self::Assign(var_name, expr) => {
                 // Create new environment
                 let mut new_env = env.clone();
-                new_env.var_set(var_name, expr.eval(env));
+                if new_env.variables.insert(var_name, expr.eval(env)).is_none() {
+                    panic!("variable does not exists: {}", var_name);
+                }
                 vec![LocalState {
                     environment: new_env,
                     statements: cont.to_vec(),
@@ -218,18 +240,40 @@ impl Statement {
                 let mut states = Vec::new();
 
                 for (guard, stmts) in cases {
-                    if guard.exec(env) {
+                    if let Some(new_env) = guard.exec(env, proc_name) {
                         let mut stmts = stmts.clone();
                         stmts.push(self.clone());
                         stmts.extend(cont.to_vec());
 
                         states.push(LocalState {
-                            environment: env.clone(),
+                            environment: new_env,
                             statements: stmts,
                         });
                     }
                 }
                 states
+            }
+            Self::Unlock(lock_name) => {
+                match env
+                    .locks
+                    .get(lock_name)
+                    .cloned()
+                    .unwrap_or_else(|| panic!("lock does not exists: {}", lock_name))
+                {
+                    Some(owner) if owner == proc_name => {
+                        // Unlock
+                        let mut new_env = env.clone();
+                        new_env.locks.insert(lock_name, None);
+                        vec![LocalState {
+                            environment: new_env,
+                            statements: cont.to_vec(),
+                        }]
+                    }
+                    _ => {
+                        // Should panic?
+                        vec![]
+                    }
+                }
             }
         }
     }
@@ -254,6 +298,11 @@ impl World {
         for (var_name, val) in &self.environment.variables {
             label.push(String::from(&format!("{}={}", var_name, val)));
         }
+        for (lock_name, proc_name) in &self.environment.locks {
+            if let Some(proc_name) = proc_name {
+                label.push(String::from(&format!("{}[{}]", lock_name, proc_name)));
+            }
+        }
         label.join("\n")
     }
 
@@ -262,6 +311,7 @@ impl World {
         World {
             environment: Environment {
                 variables: system.variables.clone(),
+                locks: system.locks.clone(),
             },
             program_counters: system
                 .processes
@@ -283,7 +333,7 @@ impl World {
         let mut worlds = Vec::new();
 
         for (proc_name, stmts) in &self.program_counters {
-            for next in stmts[0].exec(&self.environment, &stmts[1..]) {
+            for next in stmts[0].exec(&self.environment, proc_name, &stmts[1..]) {
                 let mut pcs = self.program_counters.clone();
                 pcs.insert(proc_name, next.statements.clone());
                 worlds.push(World {

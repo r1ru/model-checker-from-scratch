@@ -4,12 +4,13 @@ use model_checker_from_scratch::{
         BooleanExpression::{Lt, True},
         GuardStatement::When,
         IntegerExpression::{Add, Int, Sub, Var},
+        Locks, Process,
         Statement::{Assign, For},
-        {Process, System, Variables},
+        System, Variables,
     },
 };
 
-fn bad_thread(name: &'static str) -> Process {
+fn thread(name: &'static str) -> Process {
     Process::new(
         name,
         vec![For(vec![(
@@ -25,7 +26,8 @@ fn bad_thread(name: &'static str) -> Process {
 fn main() {
     let system = System::new(
         Variables::from([("critical", 0)]),
-        vec![bad_thread("A"), bad_thread("B"), bad_thread("C")],
+        Locks::from([]),
+        vec![thread("A"), thread("B"), thread("C")],
     );
 
     let model = system.to_kripke_model();
