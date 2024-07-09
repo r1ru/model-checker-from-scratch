@@ -160,7 +160,8 @@ impl IntegerExpression {
 pub enum BooleanExpression {
     True,
     False,
-    Lt(Box<IntegerExpression>, Box<IntegerExpression>),
+    Lt(IntegerExpression, IntegerExpression),
+    Eq(IntegerExpression, IntegerExpression),
 }
 
 impl BooleanExpression {
@@ -169,6 +170,7 @@ impl BooleanExpression {
             Self::True => true,
             Self::False => false,
             Self::Lt(lhs, rhs) => lhs.eval(env) < rhs.eval(env),
+            Self::Eq(lhs, rhs) => lhs.eval(env) == rhs.eval(env),
         }
     }
 }
@@ -218,6 +220,7 @@ pub enum GuardedCase {
 pub enum Statement {
     Assign(&'static str, IntegerExpression),
     For(Vec<GuardedCase>),
+    Switch(Vec<GuardedCase>),
     Unlock(&'static str),
 }
 
@@ -248,6 +251,22 @@ impl Statement {
                     if let Some(new_env) = guard.exec(env, proc_name) {
                         let mut stmts = stmts.clone();
                         stmts.push(self.clone());
+                        stmts.extend(cont.to_vec());
+
+                        states.push(LocalState {
+                            environment: new_env,
+                            statements: stmts,
+                        });
+                    }
+                }
+                states
+            }
+            Self::Switch(cases) => {
+                let mut states = Vec::new();
+
+                for GuardedCase::Case(guard, stmts) in cases {
+                    if let Some(new_env) = guard.exec(env, proc_name) {
+                        let mut stmts = stmts.clone();
                         stmts.extend(cont.to_vec());
 
                         states.push(LocalState {
