@@ -56,10 +56,12 @@ impl SymbolicKripkeFrame {
                         prev.and(&next)
                     })
                     .reduce(|lhs, rhs| lhs.or(&rhs))
-                    .unwrap()
+                    // Note: If a deadlock exists, tos will become empty
+                    .unwrap_or(ctx_all.mk_false())
             })
             .reduce(|lhs, rhs| lhs.or(&rhs))
-            .unwrap();
+            // Note: accs might be empty
+            .unwrap_or(ctx_all.mk_false());
 
         SymbolicKripkeFrame {
             ctx_all,
@@ -130,7 +132,8 @@ impl SymbolicKripkeFrame {
                     .mk_conjunctive_clause(&self.enc.get(id).cloned().unwrap().into())
             })
             .reduce(|lhs, rhs| lhs.or(&rhs))
-            .unwrap()
+            // Note: sat might be empty
+            .unwrap_or(self.ctx_all.mk_false())
     }
 
     /// Convert Bdd to a set of world ids
