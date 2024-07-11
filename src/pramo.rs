@@ -16,8 +16,6 @@ pub struct KripkeModel {
 
 impl KripkeModel {
     /// Verify a CTL formula
-    ///
-    /// Returns a set of counterexamples for a safety property and a satisfying set for a liveness property
     pub fn check(&self, f: &CTL<BooleanExpression>) -> HashSet<WorldId> {
         let sat = |p: &BooleanExpression| -> HashSet<WorldId> {
             self.worlds
@@ -25,22 +23,7 @@ impl KripkeModel {
                 .filter_map(|(id, w)| if w.eval(p) { Some(*id) } else { None })
                 .collect()
         };
-        let sat = self.frame.check(f, &sat);
-
-        let unsat = self
-            .worlds
-            .keys()
-            .filter_map(|id| if !sat.contains(id) { Some(*id) } else { None })
-            .collect();
-
-        match f {
-            CTL::EX(_) => sat,
-            CTL::EF(_) => sat,
-            CTL::EG(_) => sat,
-            CTL::EU(_, _) => sat,
-            CTL::AG(_) => unsat,
-            _ => unimplemented!(),
-        }
+        self.frame.check(f, &sat)
     }
 
     /// Convert to .dot string
@@ -55,7 +38,10 @@ impl KripkeModel {
             }
         }
         for id in res {
-            s.push_str(&format!("\t{} [ style = filled, fillcolor = gray ];\n", id));
+            s.push_str(&format!(
+                "\t{} [ style=filled, fillcolor=\"#ADD8E6AA\", fontcolor=black ];\n",
+                id
+            ));
         }
         s.push('}');
         s

@@ -160,7 +160,6 @@ impl SymbolicKripkeFrame {
             }
             CTL::EF(f) => self.bdd_check_ef(&self.check_internal(f, sat)),
             CTL::AG(f) => self.bdd_check_ag(&self.check_internal(f, sat)),
-            _ => unimplemented!(),
         }
     }
 
