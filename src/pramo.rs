@@ -335,13 +335,15 @@ impl World {
         let mut worlds = Vec::new();
 
         for (proc_name, stmts) in &self.program_counters {
-            for next in stmts[0].exec(&self.environment, proc_name, &stmts[1..]) {
-                let mut pcs = self.program_counters.clone();
-                pcs.insert(proc_name, next.statements.clone());
-                worlds.push(World {
-                    environment: next.environment,
-                    program_counters: pcs,
-                })
+            if !stmts.is_empty() {
+                for next in stmts[0].exec(&self.environment, proc_name, &stmts[1..]) {
+                    let mut pcs = self.program_counters.clone();
+                    pcs.insert(proc_name, next.statements.clone());
+                    worlds.push(World {
+                        environment: next.environment,
+                        program_counters: pcs,
+                    })
+                }
             }
         }
 
