@@ -11,15 +11,15 @@ use model_checker_from_scratch::{
     },
 };
 
-fn thread(
+fn process(
     name: &'static str,
     left: &'static str,
     right: &'static str,
     hold: &'static str,
 ) -> Process {
-    Process::new(
+    Process {
         name,
-        vec![For(vec![
+        statements: vec![For(vec![
             Case(
                 Lock(left),
                 vec![Assign(hold, Add(Box::new(Var(hold)), Box::new(Int(1))))],
@@ -33,18 +33,18 @@ fn thread(
                 vec![Assign(hold, Int(0)), Unlock(left), Unlock(right)],
             ),
         ])],
-    )
+    }
 }
 
 fn main() {
-    let system = System::new(
-        Variables::from([("hold1", 0), ("hold2", 0)]),
-        Locks::from([("fork1", None), ("fork2", None)]),
-        vec![
-            thread("A", "fork1", "fork2", "hold1"),
-            thread("B", "fork2", "fork1", "hold2"),
+    let system = System {
+        variables: Variables::from([("hold1", 0), ("hold2", 0)]),
+        locks: Locks::from([("fork1", None), ("fork2", None)]),
+        processes: vec![
+            process("A", "fork1", "fork2", "hold1"),
+            process("B", "fork2", "fork1", "hold2"),
         ],
-    );
+    };
 
     let model = system.to_kripke_model();
     // TODO: Consider the case where the for loop is not used in the process

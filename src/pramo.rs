@@ -50,21 +50,12 @@ impl KripkeModel {
 
 /// System
 pub struct System {
-    variables: Variables,
-    locks: Locks,
-    processes: Vec<Process>,
+    pub variables: Variables,
+    pub locks: Locks,
+    pub processes: Vec<Process>,
 }
 
 impl System {
-    // Crate new system
-    pub fn new(variables: Variables, locks: Locks, processes: Vec<Process>) -> System {
-        System {
-            processes,
-            locks,
-            variables,
-        }
-    }
-
     /// Convert to symbolic kripke model
     pub fn to_kripke_model(&self) -> KripkeModel {
         let init = World::initial_world(self);
@@ -95,15 +86,8 @@ impl System {
 
 /// Process
 pub struct Process {
-    name: &'static str,
-    statements: Vec<Statement>,
-}
-
-impl Process {
-    /// Create new process
-    pub fn new(name: &'static str, statements: Vec<Statement>) -> Process {
-        Process { name, statements }
-    }
+    pub name: &'static str,
+    pub statements: Vec<Statement>,
 }
 
 /// Variables (All variables are global and shared)

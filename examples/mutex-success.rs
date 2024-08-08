@@ -11,10 +11,10 @@ use model_checker_from_scratch::{
     },
 };
 
-fn thread(name: &'static str) -> Process {
-    Process::new(
+fn process(name: &'static str) -> Process {
+    Process {
         name,
-        vec![For(vec![Case(
+        statements: vec![For(vec![Case(
             Lock("mutex"),
             vec![
                 Assign("critical", Add(Box::new(Var("critical")), Box::new(Int(1)))),
@@ -22,15 +22,15 @@ fn thread(name: &'static str) -> Process {
                 Unlock("mutex"),
             ],
         )])],
-    )
+    }
 }
 
 fn main() {
-    let system = System::new(
-        Variables::from([("critical", 0)]),
-        Locks::from([("mutex", None)]),
-        vec![thread("A"), thread("B"), thread("C")],
-    );
+    let system = System {
+        variables: Variables::from([("critical", 0)]),
+        locks: Locks::from([("mutex", None)]),
+        processes: vec![process("A"), process("B"), process("C")],
+    };
 
     let model = system.to_kripke_model();
     let res = model.check(&AG(Box::new(AP(Lt(Var("critical"), Int(2))))));
