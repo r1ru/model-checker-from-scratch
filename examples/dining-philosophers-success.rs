@@ -48,11 +48,11 @@ fn main() {
     };
 
     let model = system.to_kripke_model();
-    let res = model.check(&Box::new(EX(Box::new(AP(True)))));
-    println!("{}", model.to_dot_string(&res));
+    let sat = model.check(&Box::new(EX(Box::new(AP(True)))));
+    println!("{}", model.to_dot_string(&sat));
 
     // There exists an execution path that falls into starvation
     // To eliminate this, we need the notion of fairness
-    let res = model.check(&EG(Box::new(AP(Lt(Var("hold2"), Int(2))))));
-    println!("{}", model.to_dot_string(&res));
+    let sat = model.check(&EG(Box::new(AP(Lt(Var("hold2"), Int(2))))));
+    println!("{}", model.to_dot_string(&sat));
 }

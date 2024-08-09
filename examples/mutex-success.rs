@@ -33,6 +33,6 @@ fn main() {
     };
 
     let model = system.to_kripke_model();
-    let res = model.check(&AG(Box::new(AP(Lt(Var("critical"), Int(2))))));
-    println!("{}", model.to_dot_string(&res));
+    let sat = model.check(&AG(Box::new(AP(Lt(Var("critical"), Int(2))))));
+    println!("{}", model.to_dot_string(&sat));
 }

@@ -48,6 +48,6 @@ fn main() {
 
     let model = system.to_kripke_model();
     // TODO: Consider the case where the for loop is not used in the process
-    let res = model.check(&Box::new(EX(Box::new(AP(True)))));
-    println!("{}", model.to_dot_string(&res));
+    let sat = model.check(&Box::new(EX(Box::new(AP(True)))));
+    println!("{}", model.to_dot_string(&sat));
 }

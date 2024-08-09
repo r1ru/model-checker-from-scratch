@@ -10,6 +10,7 @@ use std::{
 /// Kripke model
 pub struct KripkeModel {
     worlds: HashMap<WorldId, World>,
+    initial: WorldId,
     accs: HashMap<WorldId, HashSet<WorldId>>,
     frame: SymbolicKripkeFrame,
 }
@@ -27,21 +28,24 @@ impl KripkeModel {
     }
 
     /// Convert to .dot string
-    pub fn to_dot_string(&self, res: &HashSet<WorldId>) -> String {
+    pub fn to_dot_string(&self, sat: &HashSet<WorldId>) -> String {
         let mut s = String::from("digraph {\n");
         for (id, wld) in &self.worlds {
             s.push_str(&format!("\t{} [ label = \"{}\" ];\n", id, wld.label()));
+            if *id == self.initial {
+                s.push_str(&format!("\t{} [ penwidth = 5 ];\n", id));
+            }
+            if sat.contains(id) {
+                s.push_str(&format!(
+                    "\t{} [ style=filled, fillcolor=\"#ADD8E6AA\", fontcolor=black ];\n",
+                    id
+                ));
+            }
         }
         for (from, tos) in &self.accs {
             for to in tos {
                 s.push_str(&format!("\t{} -> {};\n", from, to));
             }
-        }
-        for id in res {
-            s.push_str(&format!(
-                "\t{} [ style=filled, fillcolor=\"#ADD8E6AA\", fontcolor=black ];\n",
-                id
-            ));
         }
         s.push('}');
         s
@@ -78,6 +82,7 @@ impl System {
 
         KripkeModel {
             worlds: visited.clone(),
+            initial: init.id(),
             accs: accs.clone(),
             frame: SymbolicKripkeFrame::from(visited.keys().cloned().collect(), accs),
         }
