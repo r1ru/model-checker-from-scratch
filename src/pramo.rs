@@ -109,10 +109,7 @@ struct Environment {
 }
 
 /// LocalState
-struct LocalState {
-    environment: Environment,
-    statements: Vec<Statement>,
-}
+struct LocalState(Environment, Vec<Statement>);
 
 /// Integer Expression
 #[derive(Clone, Hash)]
@@ -222,10 +219,7 @@ impl Statement {
                 if new_env.variables.insert(var_name, expr.eval(env)).is_none() {
                     panic!("variable does not exists: {}", var_name);
                 }
-                vec![LocalState {
-                    environment: new_env,
-                    statements: cont.to_vec(),
-                }]
+                vec![LocalState(new_env, cont.to_vec())]
             }
             Self::For(cases) => {
                 let mut states = Vec::new();
@@ -235,11 +229,7 @@ impl Statement {
                         let mut stmts = stmts.clone();
                         stmts.push(self.clone());
                         stmts.extend(cont.to_vec());
-
-                        states.push(LocalState {
-                            environment: new_env,
-                            statements: stmts,
-                        });
+                        states.push(LocalState(new_env, stmts));
                     }
                 }
                 states
@@ -251,11 +241,7 @@ impl Statement {
                     if let Some(new_env) = guard.exec(env, proc_name) {
                         let mut stmts = stmts.clone();
                         stmts.extend(cont.to_vec());
-
-                        states.push(LocalState {
-                            environment: new_env,
-                            statements: stmts,
-                        });
+                        states.push(LocalState(new_env, stmts));
                     }
                 }
                 states
@@ -271,10 +257,7 @@ impl Statement {
                         // Unlock
                         let mut new_env = env.clone();
                         new_env.locks.insert(lock_name, None);
-                        vec![LocalState {
-                            environment: new_env,
-                            statements: cont.to_vec(),
-                        }]
+                        vec![LocalState(new_env, cont.to_vec())]
                     }
                     _ => {
                         // Should panic?
@@ -341,11 +324,13 @@ impl World {
 
         for (proc_name, stmts) in &self.program_counters {
             if !stmts.is_empty() {
-                for next in stmts[0].exec(&self.environment, proc_name, &stmts[1..]) {
+                for LocalState(env, cont) in
+                    stmts[0].exec(&self.environment, proc_name, &stmts[1..])
+                {
                     let mut pcs = self.program_counters.clone();
-                    pcs.insert(proc_name, next.statements.clone());
+                    pcs.insert(proc_name, cont);
                     worlds.push(World {
-                        environment: next.environment,
+                        environment: env,
                         program_counters: pcs,
                     })
                 }

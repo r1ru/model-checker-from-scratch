@@ -119,11 +119,6 @@ impl SymbolicKripkeFrame {
         Self::bdd_check_eu(self, &self.ctx_all.mk_true(), f)
     }
 
-    /// Sat(EG(f)) = Sat(!EF(!f))
-    fn bdd_check_ag(&self, f: &Bdd) -> Bdd {
-        Self::bdd_check_ef(self, &f.not()).not()
-    }
-
     /// Convert a set of world ids to Bdd
     fn to_bdd(&self, set: &HashSet<WorldId>) -> Bdd {
         set.iter()
@@ -159,7 +154,6 @@ impl SymbolicKripkeFrame {
                 self.bdd_check_eu(&self.check_internal(f1, sat), &self.check_internal(f2, sat))
             }
             CTL::EF(f) => self.bdd_check_ef(&self.check_internal(f, sat)),
-            CTL::AG(f) => self.bdd_check_ag(&self.check_internal(f, sat)),
         }
     }
 
@@ -248,20 +242,5 @@ mod test {
             frame.check(&EF(Box::new(AP(p))), &sat),
             HashSet::from([0, 1])
         );
-    }
-
-    #[test]
-    fn test_check_ag() {
-        // Consider Kripke frame (S, R) where S = {s0, s1}, R = {(s1, s0), (s1, s1)}
-        let frame = SymbolicKripkeFrame::from(
-            HashSet::from([0, 1]),
-            HashMap::from([(1, HashSet::from([0, 1]))]),
-        );
-
-        // P = {s1}
-        let p = P(HashSet::from([1]));
-
-        // EG(p) shuold be {}
-        assert_eq!(frame.check(&AG(Box::new(AP(p))), &sat), HashSet::from([]));
     }
 }
