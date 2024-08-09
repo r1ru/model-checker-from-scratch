@@ -143,7 +143,7 @@ impl SymbolicKripkeFrame {
         // Assert: The resulting BDD does not include Boolean variables with '
         let bdd = self.ctx_vars.transfer_from(bdd, &self.ctx_all).unwrap();
         bdd.sat_valuations()
-            .map(|k| enc_rev.get(&k).cloned().unwrap())
+            .filter_map(|k| enc_rev.get(&k).cloned())
             .collect()
     }
 
