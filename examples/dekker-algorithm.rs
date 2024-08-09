@@ -1,6 +1,6 @@
 use model_checker_from_scratch::{
     ctl::CTL::{AP, EF, EG},
-    pramo::{
+    lang::{
         BooleanExpression::{Eq, Lt, True},
         IntegerExpression::{Add, Int, Sub, Var},
         Locks, Process,
@@ -12,56 +12,60 @@ use model_checker_from_scratch::{
 fn main() {
     let p = Process {
         name: "p",
-        statements: vec![While(
-            True,
-            vec![
-                Assign("wantp", Int(1)),
-                While(
-                    Eq(Var("wantq"), Int(1)),
-                    vec![If(
-                        Eq(Var("turn"), Int(1)),
-                        vec![
-                            Assign("wantp", Int(0)),
-                            Await(Eq(Var("turn"), Int(0))),
-                            Assign("wantp", Int(1)),
-                        ],
-                        vec![],
-                    )],
-                ),
-                Assign("critical", Add(Box::new(Var("critical")), Box::new(Int(1)))),
-                Assign("csp", Int(1)),
-                Assign("csp", Int(0)),
-                Assign("critical", Sub(Box::new(Var("critical")), Box::new(Int(1)))),
-                Assign("turn", Int(1)),
-                Assign("wantp", Int(0)),
-            ],
-        )],
+        statements: vec![
+            While(
+                True,
+                vec![
+                    Assign("wantp", Int(1)),
+                    While(
+                        Eq(Var("wantq"), Int(1)),
+                        vec![If(
+                            Eq(Var("turn"), Int(1)),
+                            vec![
+                                Assign("wantp", Int(0)),
+                                Await(Eq(Var("turn"), Int(0))),
+                                Assign("wantp", Int(1)),
+                            ],
+                            vec![],
+                        )],
+                    ),
+                    Assign("critical", Add(Box::new(Var("critical")), Box::new(Int(1)))),
+                    Assign("csp", Int(1)),
+                    Assign("csp", Int(0)),
+                    Assign("critical", Sub(Box::new(Var("critical")), Box::new(Int(1)))),
+                    Assign("turn", Int(1)),
+                    Assign("wantp", Int(0)),
+                ],
+            )
+        ],
     };
 
     let q = Process {
         name: "q",
-        statements: vec![While(
-            True,
-            vec![
-                Assign("wantq", Int(1)),
-                While(
-                    Eq(Var("wantp"), Int(1)),
-                    vec![If(
-                        Eq(Var("turn"), Int(0)),
-                        vec![
-                            Assign("wantq", Int(0)),
-                            Await(Eq(Var("turn"), Int(1))),
-                            Assign("wantq", Int(1)),
-                        ],
-                        vec![],
-                    )],
-                ),
-                Assign("critical", Add(Box::new(Var("critical")), Box::new(Int(1)))),
-                Assign("critical", Sub(Box::new(Var("critical")), Box::new(Int(1)))),
-                Assign("turn", Int(0)),
-                Assign("wantq", Int(0)),
-            ],
-        )],
+        statements: vec![
+            While(
+                True,
+                vec![
+                    Assign("wantq", Int(1)),
+                    While(
+                        Eq(Var("wantp"), Int(1)),
+                        vec![If(
+                            Eq(Var("turn"), Int(0)),
+                            vec![
+                                Assign("wantq", Int(0)),
+                                Await(Eq(Var("turn"), Int(1))),
+                                Assign("wantq", Int(1)),
+                            ],
+                            vec![],
+                        )],
+                    ),
+                    Assign("critical", Add(Box::new(Var("critical")), Box::new(Int(1)))),
+                    Assign("critical", Sub(Box::new(Var("critical")), Box::new(Int(1)))),
+                    Assign("turn", Int(0)),
+                    Assign("wantq", Int(0)),
+                ],
+            )
+        ],
     };
 
     let system = System {

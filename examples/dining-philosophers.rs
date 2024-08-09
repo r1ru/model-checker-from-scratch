@@ -1,6 +1,6 @@
 use model_checker_from_scratch::{
     ctl::CTL::{AP, EF, EG},
-    pramo::{
+    lang::{
         BooleanExpression::{Eq, Lt, True},
         IntegerExpression::{Add, Int, Sub, Var},
         Locks, Process,
@@ -12,19 +12,21 @@ use model_checker_from_scratch::{
 fn process(name: &'static str, flag: &'static str) -> Process {
     Process {
         name,
-        statements: vec![While(
-            True,
-            vec![
-                Lock("fork1"),
-                Lock("fork2"),
-                Assign("critical", Add(Box::new(Var("critical")), Box::new(Int(1)))),
-                Assign(flag, Int(1)),
-                Assign(flag, Int(0)),
-                Assign("critical", Sub(Box::new(Var("critical")), Box::new(Int(1)))),
-                Unlock("fork2"),
-                Unlock("fork1"),
-            ],
-        )],
+        statements: vec![
+            While(
+                True,
+                vec![
+                    Lock("fork1"),
+                    Lock("fork2"),
+                    Assign("critical", Add(Box::new(Var("critical")), Box::new(Int(1)))),
+                    Assign(flag, Int(1)),
+                    Assign(flag, Int(0)),
+                    Assign("critical", Sub(Box::new(Var("critical")), Box::new(Int(1)))),
+                    Unlock("fork2"),
+                    Unlock("fork1"),
+                ],
+            )
+        ],
     }
 }
 
