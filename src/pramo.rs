@@ -160,9 +160,11 @@ impl BooleanExpression {
 #[derive(Clone, Hash)]
 pub enum Statement {
     Assign(&'static str, IntegerExpression),
-    While(BooleanExpression, Vec<Statement>),
     Lock(&'static str),
     Unlock(&'static str),
+    Await(BooleanExpression),
+    If(BooleanExpression, Vec<Statement>, Vec<Statement>),
+    While(BooleanExpression, Vec<Statement>),
 }
 
 impl Statement {
@@ -210,6 +212,24 @@ impl Statement {
                         Some(LocalState(new_env, cont.to_vec()))
                     }
                     _ => unimplemented!(),
+                }
+            }
+            Self::Await(cond) => {
+                if !cond.eval(env) {
+                    None
+                } else {
+                    Some(LocalState(env.clone(), cont.to_vec()))
+                }
+            }
+            Self::If(cond, then_stmts, else_stmts) => {
+                if cond.eval(env) {
+                    let mut stmts = then_stmts.clone();
+                    stmts.extend(cont.to_vec());
+                    Some(LocalState(env.clone(), stmts))
+                } else {
+                    let mut stmts = else_stmts.clone();
+                    stmts.extend(cont.to_vec());
+                    Some(LocalState(env.clone(), stmts))
                 }
             }
             Self::While(cond, stmts) => {
