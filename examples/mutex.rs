@@ -2,11 +2,9 @@ use model_checker_from_scratch::{
     ctl::CTL::{AP, EF, EG},
     pramo::{
         BooleanExpression::{Eq, Lt, True},
-        GuardStatement::{Lock, When},
-        GuardedCase::Case,
         IntegerExpression::{Add, Int, Sub, Var},
         Locks, Process,
-        Statement::{Assign, For, Unlock},
+        Statement::{Assign, Lock, Unlock, While},
         System, Variables,
     },
 };
@@ -14,29 +12,30 @@ use model_checker_from_scratch::{
 fn bad_process(name: &'static str) -> Process {
     Process {
         name,
-        statements: vec![For(vec![Case(
-            When(True),
+        statements: vec![While(
+            True,
             vec![
                 Assign("critical", Add(Box::new(Var("critical")), Box::new(Int(1)))),
                 Assign("critical", Sub(Box::new(Var("critical")), Box::new(Int(1)))),
             ],
-        )])],
+        )],
     }
 }
 
 fn good_process(name: &'static str, flag: &'static str) -> Process {
     Process {
         name,
-        statements: vec![For(vec![Case(
-            Lock("mutex"),
+        statements: vec![While(
+            True,
             vec![
+                Lock("mutex"),
                 Assign("critical", Add(Box::new(Var("critical")), Box::new(Int(1)))),
                 Assign(flag, Int(1)),
                 Assign(flag, Int(0)),
                 Assign("critical", Sub(Box::new(Var("critical")), Box::new(Int(1)))),
                 Unlock("mutex"),
             ],
-        )])],
+        )],
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::ctl::CTL;
 use crate::kripke::{SymbolicKripkeFrame, WorldId};
+use core::panic;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::{
@@ -155,22 +156,31 @@ impl BooleanExpression {
     }
 }
 
-/// GuardStatement
+/// Statement
 #[derive(Clone, Hash)]
-pub enum GuardStatement {
-    When(BooleanExpression),
+pub enum Statement {
+    Assign(&'static str, IntegerExpression),
+    While(BooleanExpression, Vec<Statement>),
     Lock(&'static str),
+    Unlock(&'static str),
 }
 
-impl GuardStatement {
-    fn exec(&self, env: &Environment, proc_name: &'static str) -> Option<Environment> {
+impl Statement {
+    /// Return all possible worlds after execution
+    fn exec(
+        &self,
+        env: &Environment,
+        proc_name: &'static str,
+        cont: &[Statement],
+    ) -> Option<LocalState> {
         match self {
-            Self::When(cond) => {
-                if cond.eval(env) {
-                    Some(env.clone())
-                } else {
-                    None
+            Self::Assign(var_name, expr) => {
+                // Create new environment
+                let mut new_env = env.clone();
+                if new_env.variables.insert(var_name, expr.eval(env)).is_none() {
+                    panic!("variable does not exists: {}", var_name);
                 }
+                Some(LocalState(new_env, cont.to_vec()))
             }
             Self::Lock(lock_name) => {
                 match env
@@ -182,69 +192,9 @@ impl GuardStatement {
                     None => {
                         let mut new_env = env.clone();
                         new_env.locks.insert(lock_name, Some(proc_name));
-                        Some(new_env)
+                        Some(LocalState(new_env, cont.to_vec()))
                     }
                 }
-            }
-        }
-    }
-}
-
-/// Guarded Case
-#[derive(Clone, Hash)]
-pub enum GuardedCase {
-    Case(GuardStatement, Vec<Statement>),
-}
-/// Statement
-#[derive(Clone, Hash)]
-pub enum Statement {
-    Assign(&'static str, IntegerExpression),
-    For(Vec<GuardedCase>),
-    Switch(Vec<GuardedCase>),
-    Unlock(&'static str),
-}
-
-impl Statement {
-    /// Return all possible worlds after execution
-    fn exec(
-        &self,
-        env: &Environment,
-        proc_name: &'static str,
-        cont: &[Statement],
-    ) -> Vec<LocalState> {
-        match self {
-            Self::Assign(var_name, expr) => {
-                // Create new environment
-                let mut new_env = env.clone();
-                if new_env.variables.insert(var_name, expr.eval(env)).is_none() {
-                    panic!("variable does not exists: {}", var_name);
-                }
-                vec![LocalState(new_env, cont.to_vec())]
-            }
-            Self::For(cases) => {
-                let mut states = Vec::new();
-
-                for GuardedCase::Case(guard, stmts) in cases {
-                    if let Some(new_env) = guard.exec(env, proc_name) {
-                        let mut stmts = stmts.clone();
-                        stmts.push(self.clone());
-                        stmts.extend(cont.to_vec());
-                        states.push(LocalState(new_env, stmts));
-                    }
-                }
-                states
-            }
-            Self::Switch(cases) => {
-                let mut states = Vec::new();
-
-                for GuardedCase::Case(guard, stmts) in cases {
-                    if let Some(new_env) = guard.exec(env, proc_name) {
-                        let mut stmts = stmts.clone();
-                        stmts.extend(cont.to_vec());
-                        states.push(LocalState(new_env, stmts));
-                    }
-                }
-                states
             }
             Self::Unlock(lock_name) => {
                 match env
@@ -257,12 +207,19 @@ impl Statement {
                         // Unlock
                         let mut new_env = env.clone();
                         new_env.locks.insert(lock_name, None);
-                        vec![LocalState(new_env, cont.to_vec())]
+                        Some(LocalState(new_env, cont.to_vec()))
                     }
-                    _ => {
-                        // Should panic?
-                        vec![]
-                    }
+                    _ => unimplemented!(),
+                }
+            }
+            Self::While(cond, stmts) => {
+                if !cond.eval(env) {
+                    Some(LocalState(env.clone(), cont.to_vec()))
+                } else {
+                    let mut stmts = stmts.clone();
+                    stmts.push(self.clone());
+                    stmts.extend(cont.to_vec());
+                    Some(LocalState(env.clone(), stmts))
                 }
             }
         }
@@ -324,15 +281,18 @@ impl World {
 
         for (proc_name, stmts) in &self.program_counters {
             if !stmts.is_empty() {
-                for LocalState(env, cont) in
-                    stmts[0].exec(&self.environment, proc_name, &stmts[1..])
-                {
-                    let mut pcs = self.program_counters.clone();
-                    pcs.insert(proc_name, cont);
-                    worlds.push(World {
-                        environment: env,
-                        program_counters: pcs,
-                    })
+                match stmts[0].exec(&self.environment, proc_name, &stmts[1..]) {
+                    Some(LocalState(env, cont)) => {
+                        let mut pcs = self.program_counters.clone();
+                        pcs.insert(proc_name, cont);
+                        worlds.push(World {
+                            environment: env,
+                            program_counters: pcs,
+                        })
+                    }
+                    None => {
+                        worlds.push(self.clone());
+                    }
                 }
             }
         }
