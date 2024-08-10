@@ -37,7 +37,7 @@ fn main() {
         processes: vec![process("p", "csp"), process("q", "csq")],
     };
 
-    // There is no deadlock and mutal exclusion holds but, starvation exists
+    // There is no deadlock and mutual exclusion holds but, starvation exists
     let model = system.to_kripke_model();
     let sat = model.check(&EF(Box::new(AP(Lt(Int(1), Var("critical"))))));
     assert_eq!(sat.len(), 0);
